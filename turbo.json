@@ -22,7 +22,15 @@
       "dependsOn": ["^build", "db:generate"],
       "cache": false,
       "persistent": true,
-      "passThroughEnv": ["NODE_ENV", "PORT", "DATABASE_URL", "CORS_ORIGINS", "SWAGGER_ENABLED"]
+      "passThroughEnv": [
+        "NODE_ENV",
+        "PORT",
+        "DATABASE_URL",
+        "CORS_ORIGINS",
+        "SWAGGER_ENABLED",
+        "JWT_SECRET",
+        "JWT_EXPIRES_IN_SECONDS"
+      ]
     }
   }
 }

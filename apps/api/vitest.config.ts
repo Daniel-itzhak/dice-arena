@@ -17,6 +17,8 @@ export default defineConfig({
           name: 'e2e',
           include: ['test/**/*.e2e-spec.ts'],
           globalSetup: ['test/global-setup.ts'],
+          // Every file uses the same SQLite database.
+          fileParallelism: false,
           env: {
             NODE_ENV: 'test',
             DATABASE_URL: `file:${join(e2eDatabaseDir, 'e2e.db')}`,

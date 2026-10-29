@@ -1,41 +1,20 @@
-import { AI_PLAYER_USERNAME, AuthCredentialsSchema, type AuthCredentialsDto } from '@dice-arena/shared';
-import { Controller, HttpCode, HttpStatus, Post, type INestApplication } from '@nestjs/common';
-import { Test } from '@nestjs/testing';
+import { AI_PLAYER_USERNAME, LEADERBOARD_SIZE } from '@dice-arena/shared';
+import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import type { App } from 'supertest/types.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { AppModule } from '../src/app.module.js';
-import { configureApp } from '../src/app.setup.js';
-import { AUTH_RATE_LIMIT, AuthThrottle, DEFAULT_RATE_LIMIT } from '../src/common/throttling.js';
-import { ZodBody } from '../src/common/zod/zod-body.decorator.js';
+import { AUTH_RATE_LIMIT, DEFAULT_RATE_LIMIT } from '../src/common/throttling.js';
 import { PrismaService } from '../src/prisma/prisma.service.js';
 import { AiPlayerInitializer } from '../src/users/ai-player.initializer.js';
+import { createTestApp, uniqueUsername } from './test-app.js';
 
 const ALLOWED_ORIGIN = 'http://localhost:5173';
-const VALID_CREDENTIALS = { username: 'alice', password: 'correct-horse' };
-
-/** Stands in for the upcoming auth endpoints so ZodBody and AuthThrottle run through the real HTTP stack. */
-@Controller('probe')
-class ProbeController {
-  @Post('credentials')
-  @HttpCode(HttpStatus.OK)
-  @AuthThrottle()
-  echo(@ZodBody(AuthCredentialsSchema) credentials: AuthCredentialsDto): AuthCredentialsDto {
-    return credentials;
-  }
-}
 
 describe('API (e2e)', () => {
   let app: INestApplication<App>;
 
   beforeEach(async () => {
-    const moduleRef = await Test.createTestingModule({
-      imports: [AppModule],
-      controllers: [ProbeController],
-    }).compile();
-    app = moduleRef.createNestApplication({ logger: false });
-    configureApp(app);
-    await app.init();
+    app = await createTestApp();
   });
 
   afterEach(async () => {
@@ -69,58 +48,55 @@ describe('API (e2e)', () => {
     });
   });
 
-  describe('ZodBody validation', () => {
-    it('rejects invalid bodies with a structured list of issues', async () => {
-      const response = await request(app.getHttpServer())
-        .post('/api/probe/credentials')
-        .send({ username: 'a!', password: 'short' })
-        .expect(400);
-
-      expect(response.body).toMatchObject({
-        statusCode: 400,
-        message: 'Validation failed',
-        issues: expect.arrayContaining([
-          expect.objectContaining({ path: 'username' }),
-          expect.objectContaining({ path: 'password' }),
-        ]),
-      });
-    });
-
-    it('hands the parsed body to the handler (trimmed, unknown keys stripped)', async () => {
-      await request(app.getHttpServer())
-        .post('/api/probe/credentials')
-        .send({ username: '  alice  ', password: 'correct-horse', isAdmin: true })
-        .expect(200, VALID_CREDENTIALS);
-    });
-  });
-
-  it('publishes Swagger docs whose request bodies come from the shared schemas', async () => {
+  it('publishes Swagger docs whose request and response bodies come from the shared schemas', async () => {
     await request(app.getHttpServer()).get('/api/docs').expect(200).expect('Content-Type', /html/);
-    const { body } = await request(app.getHttpServer()).get('/api/docs-json').expect(200);
+    const { body, text } = await request(app.getHttpServer()).get('/api/docs-json').expect(200);
 
+    const json = (schema: object): object => ({ content: { 'application/json': { schema } } });
     expect(body).toMatchObject({
       paths: {
         '/api/health': { get: expect.any(Object) },
-        '/api/probe/credentials': {
+        '/api/auth/register': {
           post: {
-            requestBody: {
-              content: {
-                'application/json': {
-                  schema: {
-                    type: 'object',
-                    required: ['username', 'password'],
-                    properties: {
-                      username: { minLength: 3, maxLength: 20 },
-                      password: { minLength: 8 },
-                    },
-                  },
-                },
+            requestBody: json({
+              type: 'object',
+              required: ['username', 'password'],
+              properties: {
+                username: { minLength: 3, maxLength: 20 },
+                password: { minLength: 8 },
               },
+            }),
+            responses: {
+              '201': json({ type: 'object', required: ['accessToken', 'user'] }),
+              '400': expect.any(Object),
+              '409': expect.any(Object),
+              '429': expect.any(Object),
+            },
+          },
+        },
+        '/api/auth/login': {
+          post: {
+            requestBody: json({ required: ['username', 'password'] }),
+            responses: {
+              '200': json({ required: ['accessToken', 'user'] }),
+              '401': expect.any(Object),
+            },
+          },
+        },
+        '/api/users/leaderboard': {
+          get: {
+            responses: {
+              '200': json({
+                type: 'array',
+                maxItems: LEADERBOARD_SIZE,
+                items: { required: ['id', 'username', 'wins', 'gamesPlayed', 'winRatePercent'] },
+              }),
             },
           },
         },
       },
     });
+    expect(text).not.toContain('passwordHash');
   });
 
   describe('AI player bootstrap', () => {
@@ -158,11 +134,12 @@ describe('API (e2e)', () => {
 
     it(`limits auth endpoints to ${AUTH_RATE_LIMIT.limit} requests per minute`, async () => {
       const server = app.getHttpServer();
+      const credentials = { username: uniqueUsername(), password: 'correct-horse' };
       for (let i = 0; i < AUTH_RATE_LIMIT.limit; i++) {
-        await request(server).post('/api/probe/credentials').send(VALID_CREDENTIALS).expect(200);
+        await request(server).post('/api/auth/login').send(credentials).expect(401);
       }
 
-      await request(server).post('/api/probe/credentials').send(VALID_CREDENTIALS).expect(429);
+      await request(server).post('/api/auth/login').send(credentials).expect(429);
     });
   });
 });

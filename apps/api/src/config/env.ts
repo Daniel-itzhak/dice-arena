@@ -3,6 +3,11 @@ import { DEFAULT_DATABASE_URL, resolveSqliteUrl } from './paths.js';
 
 const DEFAULT_CORS_ORIGIN = 'http://localhost:5173';
 
+/** Lets development and tests run without configuration; production refuses to start without a real secret. */
+const DEV_JWT_SECRET = 'dice-arena-development-only-jwt-secret';
+const JWT_SECRET_MIN_LENGTH = 32;
+const DEFAULT_JWT_EXPIRES_IN_SECONDS = 12 * 60 * 60;
+
 const OriginSchema = z
   .url({ protocol: /^https?$/ })
   .refine((value) => !URL.canParse(value) || new URL(value).origin === value, {
@@ -30,10 +35,21 @@ const EnvSchema = z
       )
       .pipe(z.array(OriginSchema).min(1)),
     SWAGGER_ENABLED: z.stringbool().optional(),
+    /** HMAC key for signing access tokens (HS256). */
+    JWT_SECRET: z
+      .string()
+      .min(JWT_SECRET_MIN_LENGTH, `must be at least ${JWT_SECRET_MIN_LENGTH} characters`)
+      .optional(),
+    JWT_EXPIRES_IN_SECONDS: z.coerce.number().int().positive().default(DEFAULT_JWT_EXPIRES_IN_SECONDS),
   })
-  .transform(({ SWAGGER_ENABLED, ...env }) => ({
+  .refine((env) => env.NODE_ENV !== 'production' || env.JWT_SECRET !== undefined, {
+    path: ['JWT_SECRET'],
+    error: 'is required when NODE_ENV=production',
+  })
+  .transform(({ SWAGGER_ENABLED, JWT_SECRET, ...env }) => ({
     ...env,
     SWAGGER_ENABLED: SWAGGER_ENABLED ?? env.NODE_ENV !== 'production',
+    JWT_SECRET: JWT_SECRET ?? DEV_JWT_SECRET,
   }));
 
 export type Env = z.output<typeof EnvSchema>;

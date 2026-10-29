@@ -15,3 +15,5 @@ export const DIE_MAX_FACE = 6;
 
 /** Username of the built-in AI opponent; reserved so no human account can claim it. */
 export const AI_PLAYER_USERNAME = 'RoboRoller';
+
+export const LEADERBOARD_SIZE = 10;

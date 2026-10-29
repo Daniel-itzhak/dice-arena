@@ -1,0 +1,19 @@
+{
+  "name": "dice-arena",
+  "private": true,
+  "description": "Dice Arena: a 2-player dice game monorepo (NestJS API, React web, shared contracts).",
+  "license": "UNLICENSED",
+  "packageManager": "pnpm@12.16.1",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test"
+  },
+  "devDependencies": {
+    "turbo": "^2.11.10"
+  }
+}

@@ -1,0 +1,14 @@
+packages:
+  - apps/*
+  - packages/*
+
+allowBuilds:
+  esbuild: true
+
+# Single version source for dependencies shared across workspaces.
+# Reference with "catalog:" in a package.json instead of a semver range.
+catalog:
+  tsup: ^9.0.0
+  typescript: ~6.0.3
+  vitest: ^5.0.5
+  zod: ^4.6.7

@@ -1,0 +1,18 @@
+---
+description: Rules for shared Zod schemas, DTOs, and type contracts in packages/shared.
+globs: packages/shared/**/*
+alwaysApply: false
+---
+
+# Shared Contracts Package (`@dice-arena/shared`)
+
+## 1. Responsibilities
+- Define all API request/response schemas using `zod` and export inferred TypeScript types (`z.infer<typeof Schema>`).
+- Export domain enums/unions:
+  - `GameStatus`: `'ACTIVE' | 'FINISHED'`
+  - `RollOutcome`: `'STANDARD' | 'DOUBLE_SIX' | 'HOLD' | 'WIN' | null`
+- Export validation constraints as shared constants (e.g., `DEFAULT_TARGET_SCORE = 100`, `MIN_TARGET_SCORE = 10`, `MAX_TARGET_SCORE = 1000`).
+
+## 2. Strict Prohibitions
+- **Zero Runtime Side Effects:** Do NOT include database clients, Node-specific modules (`crypto`, `fs`), or business logic functions (like calculating if a score wins) in this package.
+- Keep exports clean through `src/index.ts` so both NestJS (`CommonJS`/`ESM`) and Vite can import `@dice-arena/shared` seamlessly.

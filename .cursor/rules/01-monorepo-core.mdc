@@ -1,0 +1,21 @@
+---
+description: Core monorepo architecture, strict separation of concerns, and global engineering standards for Dice Arena.
+globs: 
+alwaysApply: true
+---
+
+# Dice Arena Monorepo — Core Architecture & Standards
+
+## 1. Project Topology
+- **Package Manager:** `pnpm` with Turborepo (`turbo.json`). Always use `pnpm --filter <pkg>` when installing dependencies for a specific workspace.
+- **`packages/shared` (`@dice-arena/shared`):** Single source of truth for all Zod validation schemas, TypeScript DTOs, and constants.
+- **`apps/api`:** NestJS + Prisma (SQLite) backend. Owns 100% of game rules, dice RNG, turn validation, AI opponent heuristics, and authentication.
+- **`apps/web`:** React + Vite + Tailwind + Zustand frontend. Pure presentation and audio layer.
+
+## 2. Non-Negotiable Assignment Invariant
+- **ZERO GAME LOGIC IN FRONTEND:** `apps/web` must NEVER roll dice, compute scores, check if a player reached the winning score, or decide turn switches. Every state transition must happen on `apps/api` and return a canonical `GameStateDto`.
+
+## 3. Code Quality & Extensibility Standards
+- **Strict TypeScript:** `strict: true`, `noImplicitAny: true`, `noUnusedLocals: true`. Never use `any` or `@ts-ignore`.
+- **Self-Documenting Errors:** Use structured HTTP exceptions on the backend and typed error boundaries/toasts on the frontend.
+- **Env Safety:** Validate environment variables at startup; never hardcode JWT secrets in source files (use fallback dev defaults only inside config factories).

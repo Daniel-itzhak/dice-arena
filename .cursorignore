@@ -1,0 +1,8 @@
+node_modules/
+dist/
+build/
+.turbo/
+coverage/
+*.db
+*.db-journal
+pnpm-lock.yaml

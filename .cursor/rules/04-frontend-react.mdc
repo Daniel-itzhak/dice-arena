@@ -1,0 +1,23 @@
+---
+description: React frontend rules, dumb-client enforcement, dual-slot JWT management, and UI/audio animations.
+globs: apps/web/**/*
+alwaysApply: false
+---
+
+# Frontend React Application Rules (`apps/web`)
+
+## 1. Strict "Dumb Client" Enforcement
+- **FORBIDDEN IN `apps/web`:**
+  - NEVER generate random dice numbers (except purely cosmetic spinning frames while awaiting an API response, which must immediately resolve to the API's `lastRoll`).
+  - NEVER compute `globalScore + roundScore` to check for a win locally.
+  - NEVER toggle the active player locally; always read `game.activePlayerId` from the latest backend `GameStateDto`.
+
+## 2. Dual-Player Same-Page Auth Architecture
+- Maintain two independent auth slots in the Zustand store (`slot1` and `slot2`), each storing `{ user: UserDto | null, token: string | null }`.
+- When dispatching `POST /api/games/:id/roll` or `POST /api/games/:id/hold`, dynamically attach the `Authorization: Bearer <token>` belonging to whichever slot matches `game.activePlayerId`.
+- Prevent `slot2` from logging in with the same `user.id` as `slot1`.
+
+## 3. Required UX & Extra Features
+- **Double 6 & 6 Penalty Lockout:** When an API response transitions `lastOutcome` to `'DOUBLE_SIX'`, lock action buttons (`isActionLocked = true`) for 2000ms, play the penalty sound effect, and render a prominent animated banner explaining that rolling 6 & 6 wiped the round score and passed the turn.
+- **AI Turn Playback:** When `activePlayer` is the AI user (`isAi === true`) and `game.status === 'ACTIVE'`, use a `useEffect` timer (~950ms delay) to call `POST /api/games/:id/ai-step` repeatedly until the turn passes back to the human player or the game ends.
+- **Web Audio API:** Trigger procedural Web Audio synthesized sounds (`soundEngine.ts`) on roll, hold, double-six penalty, and win—with a global mute toggle.

@@ -1,0 +1,28 @@
+---
+description: NestJS backend architecture, game engine rules, security guards, and Prisma persistence standards.
+globs: apps/api/**/*
+alwaysApply: false
+---
+
+# Backend API & Game Engine Rules (`apps/api`)
+
+## 1. Game Rules State Machine (Enforced Exclusively in `GameService`)
+- **2-Player Turn Validation:** Every mutation (`roll`, `hold`) MUST verify:
+  1. `game.status === 'ACTIVE'`
+  2. `game.activePlayerId === currentUser.id` (from JWT `sub`). If not, throw `ForbiddenException('Not your turn')`.
+- **Cryptographic Dice RNG:** Inject `DiceService` which uses Node's `crypto.randomInt(1, 7)`. NEVER use `Math.random()`. Keep `DiceService.rollPair()` easily mockable for unit tests.
+- **Roll Mechanics:**
+  - Roll 2 dice (`[d1, d2]`).
+  - If `d1 === 6 && d2 === 6`: set `currentRoundScore = 0`, switch `activePlayerId` to opponent, set `lastOutcome = 'DOUBLE_SIX'`.
+  - Otherwise: `currentRoundScore += (d1 + d2)`, keep `activePlayerId` unchanged, set `lastOutcome = 'STANDARD'`.
+- **Hold Mechanics:**
+  - Reject with `BadRequestException` if `currentRoundScore === 0`.
+  - Add `currentRoundScore` to active player's global score, reset `currentRoundScore = 0`.
+  - If new global score `>= game.targetScore`: set `status = 'FINISHED'`, `winnerId = activePlayerId`, `lastOutcome = 'WIN'`, and atomically increment `wins` and `gamesPlayed` on the `User` records.
+  - Else: switch `activePlayerId` to opponent, set `lastOutcome = 'HOLD'`.
+- **Concurrency:** Wrap state-mutating operations (`roll`, `hold`, `aiStep`) in `prisma.$transaction` and increment the `version` field to prevent double-click race conditions.
+
+## 2. Security & Auth Architecture
+- **Password Security:** Hash passwords with `argon2` or `bcrypt`. Never return `passwordHash` in any response or serialized entity.
+- **Same-Page Dual Auth Compatibility:** Use stateless JWT Bearer tokens in the `Authorization` header (`JwtAuthGuard`). Do NOT rely on single-cookie session state so the frontend can hold two simultaneous player tokens in memory/storage.
+- **Hardening:** Enforce `helmet`, CORS whitelist, and `@nestjs/throttler` rate limiting.

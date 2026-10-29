@@ -12,3 +12,6 @@ export const DEFAULT_TARGET_SCORE = 100;
 
 export const DIE_MIN_FACE = 1;
 export const DIE_MAX_FACE = 6;
+
+/** Username of the built-in AI opponent; reserved so no human account can claim it. */
+export const AI_PLAYER_USERNAME = 'RoboRoller';

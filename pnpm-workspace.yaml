@@ -3,12 +3,18 @@ packages:
   - packages/*
 
 allowBuilds:
+  '@prisma/engines': true
+  '@scarf/scarf': false
+  better-sqlite3: true
   esbuild: true
+  prisma: true
 
 # Single version source for dependencies shared across workspaces.
 # Reference with "catalog:" in a package.json instead of a semver range.
 catalog:
+  '@types/node': ^24.19.2
   tsup: ^9.0.0
   typescript: ~6.0.3
+  vite: ^8.3.5
   vitest: ^5.0.5
   zod: ^4.6.7

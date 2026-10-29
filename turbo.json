@@ -2,22 +2,27 @@
   "$schema": "./node_modules/turbo/schema.json",
   "ui": "stream",
   "tasks": {
+    "db:generate": {
+      "inputs": ["prisma/schema.prisma", "prisma.config.ts"],
+      "outputs": ["src/generated/prisma/**"]
+    },
     "build": {
-      "dependsOn": ["^build"],
-      "inputs": ["$TURBO_DEFAULT$", "!**/*.test.ts"],
+      "dependsOn": ["^build", "db:generate"],
+      "inputs": ["$TURBO_DEFAULT$", "!**/*.test.ts", "!**/*.spec.ts", "!test/**"],
       "outputs": ["dist/**"]
     },
     "typecheck": {
-      "dependsOn": ["^build"]
+      "dependsOn": ["^build", "db:generate"]
     },
     "test": {
-      "dependsOn": ["^build"],
+      "dependsOn": ["^build", "db:generate"],
       "outputs": []
     },
     "dev": {
-      "dependsOn": ["^build"],
+      "dependsOn": ["^build", "db:generate"],
       "cache": false,
-      "persistent": true
+      "persistent": true,
+      "passThroughEnv": ["NODE_ENV", "PORT", "DATABASE_URL", "CORS_ORIGINS", "SWAGGER_ENABLED"]
     }
   }
 }

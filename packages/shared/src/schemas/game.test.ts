@@ -23,6 +23,16 @@ describe('CreateGameSchema', () => {
     expect(CreateGameSchema.safeParse({ ...base, targetScore }).success).toBe(false);
   });
 
+  it.each([
+    [50.5, 'Target score must be a whole number'],
+    [Number.NaN, 'Target score must be a whole number'],
+    [9, 'Target score must be at least 10'],
+    [1001, 'Target score must be at most 1000'],
+  ])('explains why targetScore %j is rejected', (targetScore, message) => {
+    const result = CreateGameSchema.safeParse({ ...base, targetScore });
+    expect(result.error?.issues.map((issue) => issue.message)).toEqual([message]);
+  });
+
   it('requires isVsAi', () => {
     expect(CreateGameSchema.safeParse({ player1Id: 'u1', player2Id: 'u2' }).success).toBe(false);
   });

@@ -9,6 +9,7 @@
   },
   "scripts": {
     "build": "turbo run build",
+    "db:push": "pnpm --filter @dice-arena/api db:push",
     "dev": "turbo run dev",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test"

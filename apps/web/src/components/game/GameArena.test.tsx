@@ -1,13 +1,31 @@
 import type { AiDecision, AiStepResponseDto, GameStateDto } from '@dice-arena/shared';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { playDiceRoll, playDoubleSix, playHold, playWin } from '../../audio/soundEngine';
 import { env } from '../../config/env';
 import { useArenaStore } from '../../store/useArenaStore';
 import { alice, bob, gameState, robo, seat } from '../../test/fixtures';
 import { fetchMock, jsonResponse, respondWith, sentRequest } from '../../test/http';
 import { AI_STEP_DELAY_MS, GameArena, PENALTY_LOCKOUT_MS } from './GameArena';
 
+vi.mock('../../audio/soundEngine', () => ({
+  playDiceRoll: vi.fn(),
+  playHold: vi.fn(),
+  playDoubleSix: vi.fn(),
+  playWin: vi.fn(),
+}));
+
 const PENALTY_BANNER = 'Snake Eyes 6 & 6! Round score wiped — Turn passed!';
+
+/** How many times each cue has played, for one-line assertions on the whole set. */
+function soundsPlayed(): { dice: number; hold: number; doubleSix: number; win: number } {
+  return {
+    dice: vi.mocked(playDiceRoll).mock.calls.length,
+    hold: vi.mocked(playHold).mock.calls.length,
+    doubleSix: vi.mocked(playDoubleSix).mock.calls.length,
+    win: vi.mocked(playWin).mock.calls.length,
+  };
+}
 
 /** Renders the arena for whatever game is in the store, the way `App` does. */
 function StoreBackedArena() {
@@ -80,6 +98,10 @@ describe('GameArena', () => {
     localStorage.clear();
     fetchMock.mockReset();
     vi.stubGlobal('fetch', fetchMock);
+    vi.mocked(playDiceRoll).mockClear();
+    vi.mocked(playHold).mockClear();
+    vi.mocked(playDoubleSix).mockClear();
+    vi.mocked(playWin).mockClear();
   });
 
   afterEach(() => {
@@ -375,6 +397,95 @@ describe('GameArena', () => {
       expect(fetchMock).toHaveBeenCalledTimes(2);
       expect(screen.queryByRole('alert')).toBeNull();
       expect(roundScoreOf('RoboRoller')).toBe('4');
+    });
+  });
+
+  describe('sound cues', () => {
+    it('plays the dice when the server reports a standard roll', async () => {
+      startHumanMatch();
+      renderArena();
+      respondWith(200, gameState({ roundScore: 7, lastRoll: [3, 4], lastOutcome: 'STANDARD', version: 2 }));
+
+      click('Roll Dice');
+      expect(soundsPlayed()).toEqual({ dice: 0, hold: 0, doubleSix: 0, win: 0 });
+      await advance();
+
+      expect(soundsPlayed()).toEqual({ dice: 1, hold: 0, doubleSix: 0, win: 0 });
+    });
+
+    it('plays the buzzer for a double six', async () => {
+      startHumanMatch(gameState({ roundScore: 15 }));
+      renderArena();
+      respondWith(200, gameState({ activePlayerId: bob.id, lastRoll: [6, 6], lastOutcome: 'DOUBLE_SIX', version: 2 }));
+
+      click('Roll Dice');
+      await advance();
+
+      expect(soundsPlayed()).toEqual({ dice: 0, hold: 0, doubleSix: 1, win: 0 });
+    });
+
+    it('plays the chime when a round is banked', async () => {
+      startHumanMatch(gameState({ roundScore: 12 }));
+      renderArena();
+      respondWith(200, gameState({ activePlayerId: bob.id, lastOutcome: 'HOLD', version: 2 }));
+
+      click('Hold');
+      await advance();
+
+      expect(soundsPlayed()).toEqual({ dice: 0, hold: 1, doubleSix: 0, win: 0 });
+    });
+
+    it('plays the fanfare when the hold wins the match', async () => {
+      startHumanMatch(gameState({ roundScore: 12, players: { player1: seat(alice, 95), player2: seat(bob) } }));
+      renderArena();
+      respondWith(
+        200,
+        gameState({
+          status: 'FINISHED',
+          winnerId: alice.id,
+          lastOutcome: 'WIN',
+          version: 2,
+          players: { player1: { ...seat(alice, 107), wins: 3 }, player2: seat(bob) },
+        }),
+      );
+
+      click('Hold');
+      await advance();
+
+      expect(soundsPlayed()).toEqual({ dice: 0, hold: 0, doubleSix: 0, win: 1 });
+    });
+
+    it("plays the AI's outcomes as its steps come back", async () => {
+      startAiMatch({ activePlayerId: robo.id });
+      renderArena();
+      respondWith(200, aiStep('ROLL', { activePlayerId: robo.id, roundScore: 8, lastRoll: [5, 3], lastOutcome: 'STANDARD', version: 2 }));
+      respondWith(
+        200,
+        aiStep('HOLD', {
+          activePlayerId: alice.id,
+          lastRoll: [5, 3],
+          lastOutcome: 'HOLD',
+          version: 3,
+          players: { player1: seat(alice), player2: seat(robo, 8) },
+        }),
+      );
+
+      await advance(AI_STEP_DELAY_MS);
+      expect(soundsPlayed()).toEqual({ dice: 1, hold: 0, doubleSix: 0, win: 0 });
+
+      await advance(AI_STEP_DELAY_MS);
+      expect(soundsPlayed()).toEqual({ dice: 1, hold: 1, doubleSix: 0, win: 0 });
+    });
+
+    it('stays silent when the server rejects the action', async () => {
+      startHumanMatch(gameState({ roundScore: 5 }));
+      renderArena();
+      respondWith(409, { statusCode: 409, error: 'Conflict', message: 'Game is already finished' });
+
+      click('Roll Dice');
+      await advance();
+
+      expect(soundsPlayed()).toEqual({ dice: 0, hold: 0, doubleSix: 0, win: 0 });
     });
   });
 

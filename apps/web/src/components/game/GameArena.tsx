@@ -1,6 +1,13 @@
-import { MAX_TARGET_SCORE, MIN_TARGET_SCORE, type GameStateDto, type PlayerStateDto } from '@dice-arena/shared';
+import {
+  MAX_TARGET_SCORE,
+  MIN_TARGET_SCORE,
+  type GameStateDto,
+  type PlayerStateDto,
+  type RollOutcome,
+} from '@dice-arena/shared';
 import { useEffect, useEffectEvent, useId, useRef, useState } from 'react';
 import { gameApi } from '../../api/client';
+import { playDiceRoll, playDoubleSix, playHold, playWin } from '../../audio/soundEngine';
 import { describeError } from '../../errors';
 import { useArenaStore } from '../../store/useArenaStore';
 import { resolveTargetScore } from '../lobby/targetScore';
@@ -20,6 +27,17 @@ const TURN_REQUESTS: Record<TurnAction, () => Promise<GameStateDto>> = {
   roll: () => gameApi.roll(),
   hold: () => gameApi.hold(),
   'ai-step': () => gameApi.aiStep(),
+};
+
+/**
+ * One sound cue per outcome the server reports. The cue is chosen from the response, never from what
+ * the client expected to happen, so the audio can only ever describe the API's decision.
+ */
+const OUTCOME_SOUNDS: Record<NonNullable<RollOutcome>, () => void> = {
+  STANDARD: playDiceRoll,
+  DOUBLE_SIX: playDoubleSix,
+  HOLD: playHold,
+  WIN: playWin,
 };
 
 interface GameArenaProps {
@@ -76,6 +94,9 @@ export function GameArena({ game }: GameArenaProps) {
       const next = await TURN_REQUESTS[action]();
       if (!isLatest()) {
         return;
+      }
+      if (next.lastOutcome !== null) {
+        OUTCOME_SOUNDS[next.lastOutcome]();
       }
       if (next.lastOutcome === 'DOUBLE_SIX') {
         startPenaltyLockout(moverId);

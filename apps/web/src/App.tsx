@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { AudioControls } from './components/audio/AudioControls';
 import { GameArena } from './components/game/GameArena';
 import { LeaderboardModal } from './components/leaderboard/LeaderboardModal';
 import { DualAuthPanel } from './components/lobby/DualAuthPanel';
@@ -16,12 +17,15 @@ export function App() {
           <h1 className="text-2xl font-black tracking-tight">
             Dice <span className="text-amber-300">Arena</span>
           </h1>
-          <button type="button" onClick={() => setLeaderboardOpen(true)} className={SECONDARY_BUTTON}>
-            <svg aria-hidden="true" viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M8 21h8M12 17v4M7 4h10v5a5 5 0 01-10 0V4zM7 6H4v1a3 3 0 003 3M17 6h3v1a3 3 0 01-3 3" />
-            </svg>
-            Leaderboard
-          </button>
+          <nav aria-label="Primary" className="flex items-center gap-2">
+            <AudioControls />
+            <button type="button" onClick={() => setLeaderboardOpen(true)} className={SECONDARY_BUTTON}>
+              <svg aria-hidden="true" viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8 21h8M12 17v4M7 4h10v5a5 5 0 01-10 0V4zM7 6H4v1a3 3 0 003 3M17 6h3v1a3 3 0 01-3 3" />
+              </svg>
+              Leaderboard
+            </button>
+          </nav>
         </div>
       </header>
       <main className="mx-auto max-w-5xl px-6 py-10">

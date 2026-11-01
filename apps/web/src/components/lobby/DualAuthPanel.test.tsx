@@ -76,6 +76,21 @@ describe('DualAuthPanel', () => {
       expect(card('Player 1').getByLabelText('Username')).toBeDefined();
     });
 
+    it('toggles password visibility on Sign in and Register', async () => {
+      const user = renderLobby();
+      const password = card('Player 1').getByLabelText<HTMLInputElement>('Password');
+      expect(password.type).toBe('password');
+
+      await user.click(card('Player 1').getByRole('button', { name: 'Show password' }));
+      expect(password.type).toBe('text');
+
+      await user.click(card('Player 1').getByRole('button', { name: 'Register' }));
+      expect(card('Player 1').getByLabelText<HTMLInputElement>('Password').type).toBe('text');
+
+      await user.click(card('Player 1').getByRole('button', { name: 'Hide password' }));
+      expect(card('Player 1').getByLabelText<HTMLInputElement>('Password').type).toBe('password');
+    });
+
     it('creates an account from the Register tab', async () => {
       const user = renderLobby();
       respondWith(201, { accessToken: 'alice-token', user: alice });

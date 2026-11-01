@@ -6,6 +6,7 @@ import {
   USERNAME_MIN_LENGTH,
   type AuthCredentialsDto,
 } from '@dice-arena/shared';
+import { Eye, EyeOff } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 import { z } from 'zod';
 import { authApi } from '../../api/client';
@@ -36,6 +37,7 @@ export function AuthForm({ slot, playerLabel, otherPlayer }: AuthFormProps) {
   const [mode, setMode] = useState<AuthMode>('login');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -103,7 +105,7 @@ export function AuthForm({ slot, playerLabel, otherPlayer }: AuthFormProps) {
       <TextField
         label="Password"
         name="password"
-        type="password"
+        type={showPassword ? 'text' : 'password'}
         autoComplete={isRegister ? 'new-password' : 'current-password'}
         maxLength={PASSWORD_MAX_LENGTH}
         value={password}
@@ -111,6 +113,23 @@ export function AuthForm({ slot, playerLabel, otherPlayer }: AuthFormProps) {
         disabled={pending}
         error={fieldErrors.password}
         hint={isRegister ? `At least ${PASSWORD_MIN_LENGTH} characters` : undefined}
+        trailing={
+          <button
+            type="button"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => setShowPassword((current) => !current)}
+            disabled={pending}
+            aria-label={showPassword ? 'Hide password' : 'Show password'}
+            aria-pressed={showPassword}
+            className="grid size-8 place-items-center rounded-lg text-slate-400 transition hover:text-slate-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400 disabled:opacity-50"
+          >
+            {showPassword ? (
+              <EyeOff className="size-4" aria-hidden="true" />
+            ) : (
+              <Eye className="size-4" aria-hidden="true" />
+            )}
+          </button>
+        }
       />
       {formError !== null && <ErrorMessage>{formError}</ErrorMessage>}
       <button type="submit" disabled={pending} className={PRIMARY_BUTTON}>

@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_TARGET_SCORE } from '../constants';
-import { CreateGameSchema, GameStateSchema, ResetGameSchema, type GameStateDto } from './game';
+import {
+  AiStepResponseSchema,
+  CreateGameSchema,
+  GameStateSchema,
+  ResetGameSchema,
+  type GameStateDto,
+} from './game';
 
 describe('CreateGameSchema', () => {
   const base = { player1Id: 'u1', player2Id: 'u2', isVsAi: false };
@@ -85,5 +91,22 @@ describe('GameStateSchema', () => {
   it('rejects unknown statuses and outcomes', () => {
     expect(GameStateSchema.safeParse({ ...freshGame, status: 'PAUSED' }).success).toBe(false);
     expect(GameStateSchema.safeParse({ ...freshGame, lastOutcome: 'BUST' }).success).toBe(false);
+  });
+
+  describe('AiStepResponseSchema', () => {
+    it.each(['ROLL', 'HOLD'] as const)('accepts the game state with aiDecision %s', (aiDecision) => {
+      const step = { ...freshGame, lastRoll: [3, 4], lastOutcome: 'STANDARD', aiDecision };
+      expect(AiStepResponseSchema.parse(step)).toEqual(step);
+    });
+
+    it('requires a known aiDecision', () => {
+      expect(AiStepResponseSchema.safeParse(freshGame).success).toBe(false);
+      expect(AiStepResponseSchema.safeParse({ ...freshGame, aiDecision: 'PASS' }).success).toBe(false);
+    });
+
+    it('still reads as a plain game state', () => {
+      const step = AiStepResponseSchema.parse({ ...freshGame, aiDecision: 'ROLL' });
+      expect(GameStateSchema.parse(step)).toEqual(freshGame);
+    });
   });
 });

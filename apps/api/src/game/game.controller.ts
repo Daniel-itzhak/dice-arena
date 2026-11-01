@@ -1,8 +1,10 @@
 import {
+  AiStepResponseSchema,
   CreateGameSchema,
   EntityIdSchema,
   GameStateSchema,
   ResetGameSchema,
+  type AiStepResponseDto,
   type CreateGameDto,
   type GameStateDto,
   type ResetGameDto,
@@ -84,6 +86,24 @@ export class GameController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<GameStateDto> {
     return this.games.hold(id, user.id);
+  }
+
+  @Post(':id/ai-step')
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({
+    description:
+      "The game after one AI action, with `aiDecision` saying whether it rolled or held. Called by the AI's human " +
+      'opponent; keep calling while the AI is still the active player and the game is active.',
+    schema: toOpenApiSchema(AiStepResponseSchema),
+  })
+  @ApiForbiddenResponse({ description: "The caller is not in the game, or it is not the AI player's turn." })
+  @ApiNotFoundResponse({ description: 'No game has this id.' })
+  @ApiConflictResponse({ description: 'The game is already finished, or another action updated it first.' })
+  aiStep(
+    @Param('id', new ZodValidationPipe(EntityIdSchema)) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<AiStepResponseDto> {
+    return this.games.aiStep(id, user.id);
   }
 
   @Post(':id/reset')

@@ -8,6 +8,7 @@ import {
 import { beforeEach, describe, expect, it } from 'vitest';
 import { Prisma } from '../generated/prisma/client.js';
 import type { PrismaService } from '../prisma/prisma.service.js';
+import { AiStrategyService } from './ai-strategy.service.js';
 import type { DiceService } from './dice.service.js';
 import { GameService } from './game.service.js';
 
@@ -58,6 +59,7 @@ interface GameWhere {
 
 const alice: StoredUser = { id: 'p1', username: 'alice', isAi: false, wins: 0, gamesPlayed: 0 };
 const bob: StoredUser = { id: 'p2', username: 'bob', isAi: false, wins: 0, gamesPlayed: 0 };
+const robo: StoredUser = { id: 'ai', username: 'RoboRoller', isAi: true, wins: 0, gamesPlayed: 0 };
 
 const WHERE_KEYS = new Set(['id', 'version', 'status', 'activePlayerId']);
 const PATCH_KEYS = new Set([
@@ -276,11 +278,16 @@ function request(targetScore = 100): CreateGameDto {
   return { player1Id: alice.id, player2Id: bob.id, targetScore, isVsAi: false };
 }
 
+function vsAi(targetScore = 100, aiSeat: 'player1' | 'player2' = 'player2'): CreateGameDto {
+  const [player1Id, player2Id] = aiSeat === 'player1' ? [robo.id, alice.id] : [alice.id, robo.id];
+  return { player1Id, player2Id, targetScore, isVsAi: true };
+}
+
 function serviceWith(
   rolls: readonly (readonly [number, number])[],
-  store = new MemoryDb([alice, bob]),
+  store = new MemoryDb([alice, bob, robo]),
 ): { service: GameService; store: MemoryDb } {
-  return { service: new GameService(store.asPrisma(), scriptedDice(rolls)), store };
+  return { service: new GameService(store.asPrisma(), scriptedDice(rolls), new AiStrategyService()), store };
 }
 
 async function rejection(promise: Promise<unknown>): Promise<unknown> {
@@ -479,6 +486,128 @@ describe('GameService', () => {
     });
   });
 
+  describe('aiStep', () => {
+    it('plays one roll per call, banks once the round reaches 21, and hands the turn back', async () => {
+      ({ service, store } = serviceWith([
+        [1, 1],
+        [5, 6],
+        [4, 6],
+      ]));
+      const game = await service.create(alice.id, vsAi());
+      await service.roll(game.id, alice.id);
+      await service.hold(game.id, alice.id);
+
+      const first = await service.aiStep(game.id, alice.id);
+      const second = await service.aiStep(game.id, alice.id);
+      const banked = await service.aiStep(game.id, alice.id);
+
+      expect(first).toMatchObject({
+        aiDecision: 'ROLL',
+        roundScore: 11,
+        lastRoll: [5, 6],
+        lastOutcome: 'STANDARD',
+        activePlayerId: robo.id,
+        version: 4,
+      });
+      expect(second).toMatchObject({ aiDecision: 'ROLL', roundScore: 21, lastRoll: [4, 6], version: 5 });
+      expect(banked).toMatchObject({
+        aiDecision: 'HOLD',
+        status: 'ACTIVE',
+        roundScore: 0,
+        lastRoll: [4, 6],
+        lastOutcome: 'HOLD',
+        activePlayerId: alice.id,
+        version: 6,
+        players: { player1: { globalScore: 2 }, player2: { id: robo.id, isAi: true, globalScore: 21 } },
+      });
+
+      const handedBack = await rejection(service.aiStep(game.id, alice.id));
+      expect(handedBack).toBeInstanceOf(ForbiddenException);
+      expect(handedBack).toMatchObject({ message: "Not the AI player's turn" });
+      expect(store.storedGame(game.id).version).toBe(6);
+    });
+
+    it('passes the turn to the human when the AI rolls a double six', async () => {
+      ({ service, store } = serviceWith([[6, 6]]));
+      const game = await service.create(alice.id, vsAi(100, 'player1'));
+
+      const bust = await service.aiStep(game.id, alice.id);
+
+      expect(bust).toMatchObject({
+        aiDecision: 'ROLL',
+        roundScore: 0,
+        lastRoll: [6, 6],
+        lastOutcome: 'DOUBLE_SIX',
+        activePlayerId: alice.id,
+        version: 2,
+        players: { player1: { globalScore: 0 }, player2: { globalScore: 0 } },
+      });
+    });
+
+    it('holds to win as soon as the round reaches the target, and records both players', async () => {
+      ({ service, store } = serviceWith([[5, 5]]));
+      const game = await service.create(alice.id, vsAi(10, 'player1'));
+      await service.aiStep(game.id, alice.id);
+
+      const won = await service.aiStep(game.id, alice.id);
+
+      expect(won).toMatchObject({
+        aiDecision: 'HOLD',
+        status: 'FINISHED',
+        roundScore: 0,
+        lastOutcome: 'WIN',
+        activePlayerId: robo.id,
+        winnerId: robo.id,
+        players: { player1: { globalScore: 10 }, player2: { globalScore: 0 } },
+      });
+      expect(store.stats(robo.id)).toEqual({ wins: 1, gamesPlayed: 1 });
+      expect(store.stats(alice.id)).toEqual({ wins: 0, gamesPlayed: 1 });
+      expect(await rejection(service.aiStep(game.id, alice.id))).toMatchObject({ message: 'Game is already finished' });
+    });
+
+    it("weighs the AI's own score and the human's score from the right seats", async () => {
+      ({ service, store } = serviceWith([[1, 1]]));
+      const game = await service.create(alice.id, vsAi(100, 'player1'));
+      Object.assign(store.storedGame(game.id), { player2GlobalScore: 85, currentRoundScore: 25 });
+
+      const pressured = await service.aiStep(game.id, alice.id);
+      expect(pressured).toMatchObject({ aiDecision: 'ROLL', roundScore: 27, activePlayerId: robo.id });
+
+      store.storedGame(game.id).player2GlobalScore = 60;
+      const relaxed = await service.aiStep(game.id, alice.id);
+      expect(relaxed).toMatchObject({
+        aiDecision: 'HOLD',
+        activePlayerId: alice.id,
+        players: { player1: { globalScore: 27 }, player2: { globalScore: 60 } },
+      });
+    });
+
+    it('refuses a stranger, a human turn, a finished game, and an unknown game without rolling', async () => {
+      const aiToMove = await service.create(alice.id, vsAi(100, 'player1'));
+      const humanToMove = await service.create(alice.id, vsAi());
+      const noAi = await service.create(alice.id, request());
+
+      const stranger = await rejection(service.aiStep(aiToMove.id, bob.id));
+      expect(stranger).toBeInstanceOf(ForbiddenException);
+      expect(stranger).toMatchObject({ message: 'You can only advance the AI in a game you are playing in' });
+      expect(await rejection(service.roll(aiToMove.id, alice.id))).toMatchObject({ message: 'Not your turn' });
+      expect(await rejection(service.aiStep(humanToMove.id, alice.id))).toMatchObject({
+        message: "Not the AI player's turn",
+      });
+      expect(await rejection(service.aiStep(noAi.id, alice.id))).toMatchObject({ message: "Not the AI player's turn" });
+
+      store.storedGame(aiToMove.id).status = 'FINISHED';
+      const finished = await rejection(service.aiStep(aiToMove.id, alice.id));
+      expect(finished).toBeInstanceOf(ConflictException);
+      expect(finished).toMatchObject({ message: 'Game is already finished' });
+      expect(await rejection(service.aiStep('missing', alice.id))).toBeInstanceOf(NotFoundException);
+
+      for (const game of [aiToMove, humanToMove, noAi]) {
+        expect(store.storedGame(game.id)).toMatchObject({ version: 1, currentRoundScore: 0, lastDie1: null });
+      }
+    });
+  });
+
   describe('reset', () => {
     it('opens a fresh rematch for either player and can change the target score', async () => {
       ({ service, store } = serviceWith([[2, 2]]));
@@ -545,6 +674,27 @@ describe('GameService', () => {
       expect(loser.reason).toBeInstanceOf(ConflictException);
       expect(loser.reason).toMatchObject({ message: 'The game changed before this action could be applied' });
       expect(store.storedGame(game.id)).toMatchObject({ currentRoundScore: 6, version: 2 });
+    });
+
+    it('applies only one of two AI steps that arrive together', async () => {
+      ({ service, store } = serviceWith([
+        [2, 3],
+        [2, 3],
+      ]));
+      const game = await service.create(alice.id, vsAi(100, 'player1'));
+      store.holdNextReads(2);
+
+      const settled = await withTimeout(
+        Promise.allSettled([service.aiStep(game.id, alice.id), service.aiStep(game.id, alice.id)]),
+      );
+
+      const applied = settled.filter((result) => result.status === 'fulfilled');
+      const conflicted = settled.filter((result) => result.status === 'rejected');
+      expect(applied).toHaveLength(1);
+      expect(conflicted).toHaveLength(1);
+      expect(applied[0]?.value).toMatchObject({ aiDecision: 'ROLL', roundScore: 5, version: 2 });
+      expect(conflicted[0]?.reason).toBeInstanceOf(ConflictException);
+      expect(store.storedGame(game.id)).toMatchObject({ currentRoundScore: 5, version: 2 });
     });
 
     it('maps a database write conflict to the same 409', async () => {

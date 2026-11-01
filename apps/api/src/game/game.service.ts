@@ -1,4 +1,4 @@
-import { DIE_MAX_FACE, type CreateGameDto, type GameStateDto } from '@dice-arena/shared';
+import { DIE_MAX_FACE, type AiStepResponseDto, type CreateGameDto, type GameStateDto } from '@dice-arena/shared';
 import {
   BadRequestException,
   ConflictException,
@@ -8,8 +8,9 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { AiStrategyService } from './ai-strategy.service.js';
 import { DiceService } from './dice.service.js';
-import { toGameState, type GameRecord } from './game.mappers.js';
+import { toGameState, type GamePlayerRecord, type GameRecord } from './game.mappers.js';
 
 /** Prisma error when a transaction loses a write conflict or deadlock. */
 const WRITE_CONFLICT = 'P2034';
@@ -30,6 +31,7 @@ export class GameService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly dice: DiceService,
+    private readonly aiStrategy: AiStrategyService,
   ) {}
 
   /**
@@ -63,17 +65,7 @@ export class GameService {
     return this.transaction(async (tx) => {
       const game = await this.requireGame(tx, gameId);
       this.assertPlayersTurn(game, userId);
-
-      const [die1, die2] = this.dice.rollPair();
-      const doubleSix = die1 === DIE_MAX_FACE && die2 === DIE_MAX_FACE;
-      const saved = await this.save(tx, game, userId, {
-        lastDie1: die1,
-        lastDie2: die2,
-        lastOutcome: doubleSix ? 'DOUBLE_SIX' : 'STANDARD',
-        currentRoundScore: doubleSix ? 0 : game.currentRoundScore + die1 + die2,
-        ...(doubleSix ? { activePlayerId: otherPlayerId(game, game.activePlayerId) } : {}),
-      });
-      return toGameState(saved);
+      return toGameState(await this.applyRoll(tx, game));
     });
   }
 
@@ -87,24 +79,31 @@ export class GameService {
     return this.transaction(async (tx) => {
       const game = await this.requireGame(tx, gameId);
       this.assertPlayersTurn(game, userId);
-      if (game.currentRoundScore === 0) {
-        throw new BadRequestException('Cannot hold without points in the current round');
-      }
+      return toGameState(await this.applyHold(tx, game));
+    });
+  }
 
-      const globalScore = globalScoreOf(game, game.activePlayerId) + game.currentRoundScore;
-      const won = globalScore >= game.targetScore;
-      const saved = await this.save(tx, game, userId, {
-        ...scoreColumn(game, globalScore),
-        currentRoundScore: 0,
-        ...(won
-          ? { status: 'FINISHED' as const, winnerId: userId, lastOutcome: 'WIN' as const }
-          : { activePlayerId: otherPlayerId(game, game.activePlayerId), lastOutcome: 'HOLD' as const }),
+  /**
+   * Plays exactly one AI action (a roll or a hold) so the client can show the AI's turn one step at a time.
+   * The caller keeps calling while the AI is still the active player.
+   * @throws NotFoundException when the game does not exist.
+   * @throws ForbiddenException when the caller is not in the game or the AI is not the active player.
+   * @throws ConflictException when the game is finished or another action updated it first.
+   */
+  aiStep(gameId: string, userId: string): Promise<AiStepResponseDto> {
+    return this.transaction(async (tx) => {
+      const game = await this.requireGame(tx, gameId);
+      this.assertAiTurn(game, userId);
+
+      const aiId = game.activePlayerId;
+      const aiDecision = this.aiStrategy.decide({
+        targetScore: game.targetScore,
+        aiScore: globalScoreOf(game, aiId),
+        opponentScore: globalScoreOf(game, otherPlayerId(game, aiId)),
+        roundScore: game.currentRoundScore,
       });
-
-      if (won) {
-        await this.recordFinishedGame(tx, userId, otherPlayerId(game, userId));
-      }
-      return toGameState(saved);
+      const saved = aiDecision === 'HOLD' ? await this.applyHold(tx, game) : await this.applyRoll(tx, game);
+      return { ...toGameState(saved), aiDecision };
     });
   }
 
@@ -121,6 +120,45 @@ export class GameService {
       'You can only reset a game you are playing in',
     );
     return this.insertGame(existing.player1Id, existing.player2Id, targetScore ?? existing.targetScore);
+  }
+
+  /** Rolls for the active player. Call only after checking that it is their turn. */
+  private async applyRoll(tx: Prisma.TransactionClient, game: GameRecord): Promise<GameRecord> {
+    const [die1, die2] = this.dice.rollPair();
+    const doubleSix = die1 === DIE_MAX_FACE && die2 === DIE_MAX_FACE;
+    return this.save(tx, game, {
+      lastDie1: die1,
+      lastDie2: die2,
+      lastOutcome: doubleSix ? 'DOUBLE_SIX' : 'STANDARD',
+      currentRoundScore: doubleSix ? 0 : game.currentRoundScore + die1 + die2,
+      ...(doubleSix ? { activePlayerId: otherPlayerId(game, game.activePlayerId) } : {}),
+    });
+  }
+
+  /**
+   * Banks the round for the active player. Call only after checking that it is their turn.
+   * @throws BadRequestException when the round has no points to bank.
+   */
+  private async applyHold(tx: Prisma.TransactionClient, game: GameRecord): Promise<GameRecord> {
+    if (game.currentRoundScore === 0) {
+      throw new BadRequestException('Cannot hold without points in the current round');
+    }
+
+    const playerId = game.activePlayerId;
+    const globalScore = globalScoreOf(game, playerId) + game.currentRoundScore;
+    const won = globalScore >= game.targetScore;
+    const saved = await this.save(tx, game, {
+      ...scoreColumn(game, globalScore),
+      currentRoundScore: 0,
+      ...(won
+        ? { status: 'FINISHED' as const, winnerId: playerId, lastOutcome: 'WIN' as const }
+        : { activePlayerId: otherPlayerId(game, playerId), lastOutcome: 'HOLD' as const }),
+    });
+
+    if (won) {
+      await this.recordFinishedGame(tx, playerId, otherPlayerId(game, playerId));
+    }
+    return saved;
   }
 
   private async insertGame(player1Id: string, player2Id: string, targetScore: number): Promise<GameStateDto> {
@@ -170,6 +208,22 @@ export class GameService {
     }
   }
 
+  /** The AI cannot sign in, so a participant who passes these checks is always its human opponent. */
+  private assertAiTurn(game: GameRecord, userId: string): void {
+    if (game.status !== 'ACTIVE') {
+      throw new ConflictException('Game is already finished');
+    }
+    this.assertParticipant(
+      game.player1Id,
+      game.player2Id,
+      userId,
+      'You can only advance the AI in a game you are playing in',
+    );
+    if (!playerOf(game, game.activePlayerId).isAi) {
+      throw new ForbiddenException("Not the AI player's turn");
+    }
+  }
+
   private assertParticipant(player1Id: string, player2Id: string, userId: string, message: string): void {
     if (userId !== player1Id && userId !== player2Id) {
       throw new ForbiddenException(message);
@@ -183,12 +237,11 @@ export class GameService {
   private async save(
     tx: Prisma.TransactionClient,
     game: GameRecord,
-    userId: string,
     changes: Prisma.GameUpdateManyMutationInput,
   ): Promise<GameRecord> {
     const data: Prisma.GameUpdateManyMutationInput = { ...changes, version: { increment: 1 } };
     const { count } = await tx.game.updateMany({
-      where: { id: game.id, version: game.version, status: 'ACTIVE', activePlayerId: userId },
+      where: { id: game.id, version: game.version, status: 'ACTIVE', activePlayerId: game.activePlayerId },
       data,
     });
     if (count !== 1) {
@@ -207,6 +260,16 @@ export class GameService {
       data: { gamesPlayed: { increment: 1 } },
     });
   }
+}
+
+function playerOf(game: GameRecord, playerId: string): GamePlayerRecord {
+  if (playerId === game.player1Id) {
+    return game.player1;
+  }
+  if (playerId === game.player2Id) {
+    return game.player2;
+  }
+  throw new Error(`Game ${game.id} has an active player who is not playing`);
 }
 
 function otherPlayerId(game: GameRecord, playerId: string): string {

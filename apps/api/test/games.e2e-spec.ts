@@ -1,4 +1,12 @@
-import { AuthResponseSchema, GameStateSchema, type DiceRoll, type GameStateDto } from '@dice-arena/shared';
+import {
+  AI_PLAYER_USERNAME,
+  AiStepResponseSchema,
+  AuthResponseSchema,
+  GameStateSchema,
+  type AiStepResponseDto,
+  type DiceRoll,
+  type GameStateDto,
+} from '@dice-arena/shared';
 import type { INestApplication } from '@nestjs/common';
 import request, { type Response } from 'supertest';
 import type { App } from 'supertest/types.js';
@@ -195,7 +203,7 @@ describe('Games (e2e)', () => {
       return stateFrom(response);
     }
 
-    it.each(['roll', 'hold', 'reset'])('POST /api/games/:id/%s requires a bearer token', async (action) => {
+    it.each(['roll', 'hold', 'reset', 'ai-step'])('POST /api/games/:id/%s requires a bearer token', async (action) => {
       const { body } = await server().post(`/api/games/some-game/${action}`).expect(401);
       expect(body).toMatchObject({ message: 'Missing bearer token' });
     });
@@ -363,6 +371,78 @@ describe('Games (e2e)', () => {
     });
   });
 
+  describe('POST /api/games/:id/ai-step', () => {
+    let human: Player;
+    let aiId: string;
+
+    beforeEach(async () => {
+      human = await register();
+      aiId = (await prisma.user.findUniqueOrThrow({ where: { username: AI_PLAYER_USERNAME } })).id;
+    });
+
+    async function createAiGame(aiSeat: 'player1' | 'player2'): Promise<GameStateDto> {
+      const [player1Id, player2Id] = aiSeat === 'player1' ? [aiId, human.id] : [human.id, aiId];
+      return stateFrom(await authed(human.token, '/api/games', { player1Id, player2Id, isVsAi: true }).expect(201));
+    }
+
+    async function aiStep(gameId: string): Promise<AiStepResponseDto> {
+      const { body } = await authed(human.token, `/api/games/${gameId}/ai-step`).expect(200);
+      return AiStepResponseSchema.parse(body);
+    }
+
+    it("lets the human opponent play the AI's turn one decision at a time", async () => {
+      script([1, 1], [5, 6], [4, 6]);
+      const game = await createAiGame('player2');
+      await authed(human.token, `/api/games/${game.id}/roll`).expect(200);
+      await authed(human.token, `/api/games/${game.id}/hold`).expect(200);
+
+      const outOfTurn = await authed(human.token, `/api/games/${game.id}/roll`).expect(403);
+      expect(outOfTurn.body).toMatchObject({ message: 'Not your turn' });
+
+      const steps = [await aiStep(game.id), await aiStep(game.id), await aiStep(game.id)];
+      expect(steps.map((step) => [step.aiDecision, step.roundScore, step.activePlayerId])).toEqual([
+        ['ROLL', 11, aiId],
+        ['ROLL', 21, aiId],
+        ['HOLD', 0, human.id],
+      ]);
+      expect(steps[2]).toMatchObject({
+        status: 'ACTIVE',
+        lastRoll: [4, 6],
+        lastOutcome: 'HOLD',
+        version: 6,
+        players: {
+          player1: { id: human.id, globalScore: 2 },
+          player2: { id: aiId, isAi: true, globalScore: 21 },
+        },
+      });
+      expect(await prisma.game.findUniqueOrThrow({ where: { id: game.id } })).toMatchObject({
+        activePlayerId: human.id,
+        player2GlobalScore: 21,
+        currentRoundScore: 0,
+        version: 6,
+      });
+
+      const humanTurn = await authed(human.token, `/api/games/${game.id}/ai-step`).expect(403);
+      expect(humanTurn.body).toEqual({ statusCode: 403, error: 'Forbidden', message: "Not the AI player's turn" });
+    });
+
+    it('refuses a spectator and an unknown game', async () => {
+      const game = await createAiGame('player1');
+      const spectator = await register();
+
+      const forbidden = await authed(spectator.token, `/api/games/${game.id}/ai-step`).expect(403);
+      expect(forbidden.body).toEqual({
+        statusCode: 403,
+        error: 'Forbidden',
+        message: 'You can only advance the AI in a game you are playing in',
+      });
+
+      const missing = await authed(human.token, '/api/games/missing-game/ai-step').expect(404);
+      expect(missing.body).toEqual({ statusCode: 404, error: 'Not Found', message: 'Game not found' });
+      expect(await prisma.game.findUniqueOrThrow({ where: { id: game.id } })).toMatchObject({ version: 1 });
+    });
+  });
+
   it('documents the game routes in the shared OpenAPI schema', async () => {
     const { body } = await server().get('/api/docs-json').expect(200);
 
@@ -371,7 +451,9 @@ describe('Games (e2e)', () => {
       '/api/games/{id}/roll': { post: expect.any(Object) },
       '/api/games/{id}/hold': { post: expect.any(Object) },
       '/api/games/{id}/reset': { post: expect.any(Object) },
+      '/api/games/{id}/ai-step': { post: expect.any(Object) },
     });
     expect(JSON.stringify(body.paths['/api/games'])).not.toContain('passwordHash');
+    expect(JSON.stringify(body.paths['/api/games/{id}/ai-step'])).toContain('aiDecision');
   });
 });

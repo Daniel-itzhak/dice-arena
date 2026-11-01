@@ -75,3 +75,12 @@ export const GameStateSchema = z.object({
   }),
 });
 export type GameStateDto = z.infer<typeof GameStateSchema>;
+
+export const AiDecisionSchema = z.enum(['ROLL', 'HOLD']);
+export type AiDecision = z.infer<typeof AiDecisionSchema>;
+
+/** The game after one AI action, plus which action the AI chose. */
+export const AiStepResponseSchema = GameStateSchema.extend({
+  aiDecision: AiDecisionSchema,
+});
+export type AiStepResponseDto = z.infer<typeof AiStepResponseSchema>;

@@ -71,6 +71,11 @@ export const GameStateSchema = z.object({
   winnerId: EntityIdSchema.nullable(),
   /** Incremented on every state mutation; used for optimistic concurrency control. */
   version: z.int().nonnegative(),
+  /**
+   * Server-computed: the active player would win if they held now
+   * (`globalScore + roundScore >= targetScore`). The client must not recompute this.
+   */
+  canWinOnHold: z.boolean(),
   players: z.object({
     player1: PlayerStateSchema,
     player2: PlayerStateSchema,

@@ -45,6 +45,15 @@ function toLastRoll(die1: number | null, die2: number | null): DiceRoll | null {
   return [die1, die2];
 }
 
+function activeGlobalScore(game: GameRecord): number {
+  return game.activePlayerId === game.player1Id ? game.player1GlobalScore : game.player2GlobalScore;
+}
+
+/** True only while the game is live and a hold would reach the target. Finished games cannot hold. */
+function canWinOnHold(game: GameRecord): boolean {
+  return game.status === 'ACTIVE' && activeGlobalScore(game) + game.currentRoundScore >= game.targetScore;
+}
+
 /** Copies the public game onto the shared contract. Stored columns that are not part of it are dropped. */
 export function toGameState(game: GameRecord): GameStateDto {
   return GameStateSchema.parse({
@@ -57,6 +66,7 @@ export function toGameState(game: GameRecord): GameStateDto {
     lastOutcome: game.lastOutcome,
     winnerId: game.winnerId,
     version: game.version,
+    canWinOnHold: canWinOnHold(game),
     players: {
       player1: toPlayer(game.player1, game.player1GlobalScore),
       player2: toPlayer(game.player2, game.player2GlobalScore),

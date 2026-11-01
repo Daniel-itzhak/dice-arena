@@ -211,6 +211,25 @@ describe('GameArena', () => {
       expect(button('Hold').disabled).toBe(true);
     });
 
+    it('disables Roll and pulses Hold when the server says a hold would win', () => {
+      startHumanMatch(
+        gameState({
+          roundScore: 12,
+          lastRoll: [6, 5],
+          lastOutcome: 'STANDARD',
+          canWinOnHold: true,
+          players: { player1: seat(alice, 95), player2: seat(bob) },
+        }),
+      );
+      renderArena();
+
+      expect(button('Roll Dice').disabled).toBe(true);
+      expect(button('Hold').disabled).toBe(false);
+      expect(button('Hold').className).toContain('animate-pulse');
+      expect(button('Hold').className).toContain('ring-4');
+      expect(button('Hold').className).toContain('ring-green-500');
+    });
+
     it("shows the server's reason when an action is rejected", async () => {
       startHumanMatch(gameState({ roundScore: 5 }));
       renderArena();
@@ -345,6 +364,7 @@ describe('GameArena', () => {
       expect(fetchMock).toHaveBeenCalledTimes(1);
       expect(screen.getByRole('heading', { name: 'RoboRoller wins the match!' })).toBeDefined();
       expect(card('RoboRoller').getByText('6 career wins')).toBeDefined();
+      expect(useArenaStore.getState().slot2.user?.wins).toBe(6);
     });
 
     it('waits for the double-six lockout to end before the AI moves', async () => {
@@ -453,6 +473,8 @@ describe('GameArena', () => {
       await advance();
 
       expect(soundsPlayed()).toEqual({ dice: 0, hold: 0, doubleSix: 0, win: 1 });
+      expect(useArenaStore.getState().slot1.user?.wins).toBe(3);
+      expect(useArenaStore.getState().slot2.user?.wins).toBe(bob.wins);
     });
 
     it("plays the AI's outcomes as its steps come back", async () => {

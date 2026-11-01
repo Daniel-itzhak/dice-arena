@@ -264,8 +264,20 @@ describe('Games (e2e)', () => {
 
       const first = stateFrom(await roll(player1).expect(200));
       const second = stateFrom(await roll(player1).expect(200));
-      expect(first).toMatchObject({ roundScore: 5, lastRoll: [2, 3], lastOutcome: 'STANDARD', activePlayerId: player1.id });
-      expect(second).toMatchObject({ roundScore: 13, lastRoll: [4, 4], lastOutcome: 'STANDARD', activePlayerId: player1.id });
+      expect(first).toMatchObject({
+        roundScore: 5,
+        lastRoll: [2, 3],
+        lastOutcome: 'STANDARD',
+        activePlayerId: player1.id,
+        canWinOnHold: false,
+      });
+      expect(second).toMatchObject({
+        roundScore: 13,
+        lastRoll: [4, 4],
+        lastOutcome: 'STANDARD',
+        activePlayerId: player1.id,
+        canWinOnHold: false,
+      });
       expect(await row()).toMatchObject({ activePlayerId: player1.id, currentRoundScore: 13, version: 3 });
 
       const bust = stateFrom(await roll(player1).expect(200));
@@ -328,6 +340,7 @@ describe('Games (e2e)', () => {
         lastOutcome: 'STANDARD',
         activePlayerId: player1.id,
         version: 2,
+        canWinOnHold: false,
       });
 
       const banked = stateFrom(await authed(player1.token, `/api/games/${game.id}/hold`).expect(200));
@@ -354,7 +367,13 @@ describe('Games (e2e)', () => {
       });
 
       const pushed = stateFrom(await authed(player1.token, `/api/games/${game.id}/roll`).expect(200));
-      expect(pushed).toMatchObject({ roundScore: 11, lastRoll: [6, 5], lastOutcome: 'STANDARD', version: 5 });
+      expect(pushed).toMatchObject({
+        roundScore: 11,
+        lastRoll: [6, 5],
+        lastOutcome: 'STANDARD',
+        version: 5,
+        canWinOnHold: true,
+      });
 
       const won = stateFrom(await authed(player1.token, `/api/games/${game.id}/hold`).expect(200));
       expect(won).toMatchObject({
@@ -365,6 +384,7 @@ describe('Games (e2e)', () => {
         activePlayerId: player1.id,
         winnerId: player1.id,
         version: 6,
+        canWinOnHold: false,
         players: { player1: { globalScore: 20, wins: 1 }, player2: { globalScore: 0, wins: 0 } },
       });
 

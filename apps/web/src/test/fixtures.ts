@@ -19,6 +19,7 @@ export function gameState(overrides: Partial<GameStateDto> = {}): GameStateDto {
     lastOutcome: null,
     winnerId: null,
     version: 1,
+    canWinOnHold: false,
     players: { player1: seat(alice), player2: seat(bob) },
     ...overrides,
   };

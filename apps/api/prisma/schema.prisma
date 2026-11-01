@@ -1,0 +1,63 @@
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  importFileExtension = "js"
+}
+
+// The connection URL lives in prisma.config.ts (CLI) and src/config/env.ts (runtime).
+datasource db {
+  provider = "sqlite"
+}
+
+enum GameStatus {
+  ACTIVE
+  FINISHED
+}
+
+enum RollOutcome {
+  STANDARD
+  DOUBLE_SIX
+  HOLD
+  WIN
+}
+
+model User {
+  id           String   @id @default(uuid())
+  username     String   @unique
+  passwordHash String
+  wins         Int      @default(0)
+  gamesPlayed  Int      @default(0)
+  isAi         Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  gamesAsPlayer1 Game[] @relation("GamePlayer1")
+  gamesAsPlayer2 Game[] @relation("GamePlayer2")
+  gamesWon       Game[] @relation("GameWinner")
+}
+
+model Game {
+  id                 String       @id @default(uuid())
+  status             GameStatus   @default(ACTIVE)
+  targetScore        Int          @default(100)
+  player1Id          String
+  player2Id          String
+  activePlayerId     String
+  player1GlobalScore Int          @default(0)
+  player2GlobalScore Int          @default(0)
+  currentRoundScore  Int          @default(0)
+  lastDie1           Int?
+  lastDie2           Int?
+  lastOutcome        RollOutcome?
+  winnerId           String?
+  version            Int          @default(1)
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  player1 User  @relation("GamePlayer1", fields: [player1Id], references: [id])
+  player2 User  @relation("GamePlayer2", fields: [player2Id], references: [id])
+  winner  User? @relation("GameWinner", fields: [winnerId], references: [id])
+
+  @@index([player1Id])
+  @@index([player2Id])
+}

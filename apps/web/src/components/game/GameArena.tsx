@@ -71,6 +71,7 @@ export function GameArena({ game }: GameArenaProps) {
   const penalizedPlayer = penalizedPlayerId === null ? undefined : findPlayer(game, penalizedPlayerId);
   const isAiTurn = game.status === 'ACTIVE' && activePlayer?.isAi === true;
   const turnControlsDisabled = isActionLocked || isFinished || isAiTurn;
+  const mustHoldToWin = game.canWinOnHold;
   const target = resolveTargetScore({ kind: 'custom', input: targetInput });
 
   function startPenaltyLockout(playerId: string): void {
@@ -190,7 +191,7 @@ export function GameArena({ game }: GameArenaProps) {
           <div className="grid grid-cols-2 gap-3">
             <button
               type="button"
-              disabled={turnControlsDisabled}
+              disabled={turnControlsDisabled || mustHoldToWin}
               onClick={() => void playTurn('roll')}
               className={`${PRIMARY_BUTTON} py-3 text-lg`}
             >
@@ -200,7 +201,7 @@ export function GameArena({ game }: GameArenaProps) {
               type="button"
               disabled={turnControlsDisabled || game.roundScore === 0}
               onClick={() => void playTurn('hold')}
-              className={`${SECONDARY_BUTTON} py-3 text-lg`}
+              className={`${SECONDARY_BUTTON} py-3 text-lg${mustHoldToWin ? ' animate-pulse ring-4 ring-green-500' : ''}`}
             >
               {turnPending === 'hold' ? 'Holding…' : 'Hold'}
             </button>

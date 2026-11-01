@@ -323,6 +323,7 @@ describe('GameService', () => {
         lastOutcome: null,
         winnerId: null,
         version: 1,
+        canWinOnHold: false,
         players: {
           player1: { id: alice.id, username: 'alice', isAi: false, wins: 0, globalScore: 0 },
           player2: { id: bob.id, username: 'bob', isAi: false, wins: 0, globalScore: 0 },
@@ -370,9 +371,16 @@ describe('GameService', () => {
         lastOutcome: 'STANDARD',
         activePlayerId: alice.id,
         version: 2,
+        canWinOnHold: false,
         players: { player1: { globalScore: 0 }, player2: { globalScore: 0 } },
       });
-      expect(second).toMatchObject({ roundScore: 10, lastRoll: [3, 4], lastOutcome: 'STANDARD', version: 3 });
+      expect(second).toMatchObject({
+        roundScore: 10,
+        lastRoll: [3, 4],
+        lastOutcome: 'STANDARD',
+        version: 3,
+        canWinOnHold: false,
+      });
     });
 
     it('clears the round and switches turns on double six', async () => {
@@ -391,6 +399,7 @@ describe('GameService', () => {
         lastOutcome: 'DOUBLE_SIX',
         activePlayerId: bob.id,
         version: 3,
+        canWinOnHold: false,
         players: { player1: { globalScore: 0 }, player2: { globalScore: 0 } },
       });
       expect(store.stats(alice.id)).toEqual({ wins: 0, gamesPlayed: 0 });
@@ -413,6 +422,24 @@ describe('GameService', () => {
         lastRoll: [die1, die2],
         lastOutcome: 'STANDARD',
         activePlayerId: alice.id,
+      });
+    });
+
+    it('flags that the active player can win by holding once the round reaches the target', async () => {
+      ({ service, store, rollPair } = serviceWith([[6, 5]]));
+      game = await service.create(alice.id, request(10));
+
+      const rolled = await service.roll(game.id, alice.id);
+
+      expect(rolled).toMatchObject({
+        status: 'ACTIVE',
+        roundScore: 11,
+        lastRoll: [6, 5],
+        lastOutcome: 'STANDARD',
+        activePlayerId: alice.id,
+        canWinOnHold: true,
+        winnerId: null,
+        players: { player1: { globalScore: 0, wins: 0 }, player2: { globalScore: 0, wins: 0 } },
       });
     });
 
@@ -453,6 +480,7 @@ describe('GameService', () => {
         activePlayerId: bob.id,
         winnerId: null,
         version: 3,
+        canWinOnHold: false,
         players: { player1: { globalScore: 9 }, player2: { globalScore: 0 } },
       });
       expect(store.stats(alice.id)).toEqual({ wins: 0, gamesPlayed: 0 });
@@ -526,6 +554,7 @@ describe('GameService', () => {
         activePlayerId: alice.id,
         winnerId: alice.id,
         version: 3,
+        canWinOnHold: false,
         players: { player1: { globalScore: score, wins: 1 }, player2: { globalScore: 0, wins: 0 } },
       });
       expect(store.stats(alice.id)).toEqual({ wins: 1, gamesPlayed: 1 });
@@ -551,7 +580,8 @@ describe('GameService', () => {
         winnerId: bob.id,
         activePlayerId: bob.id,
         lastOutcome: 'WIN',
-        players: { player1: { globalScore: 2 }, player2: { globalScore: 11 } },
+        canWinOnHold: false,
+        players: { player1: { globalScore: 2, wins: 0 }, player2: { globalScore: 11, wins: 1 } },
       });
       expect(store.stats(bob.id)).toEqual({ wins: 1, gamesPlayed: 1 });
       expect(store.stats(alice.id)).toEqual({ wins: 0, gamesPlayed: 1 });

@@ -31,6 +31,10 @@ export interface ArenaActions {
   clearSession(slot: SlotId): void;
   /** @throws SessionError when `ai` is not the AI player. */
   selectAiOpponent(ai: UserDto): void;
+  /**
+   * Stores the server's `GameStateDto` as received. When `status === 'FINISHED'`, copies
+   * `players.*.wins` onto the matching slots so lobby badges stay in sync with the API.
+   */
   setGame(game: GameStateDto | null): void;
   setActionLocked(locked: boolean): void;
 }
@@ -51,11 +55,20 @@ const PlayerSlotSchema = z.object({
 const PersistedArenaSchema = z.object({
   slot1: PlayerSlotSchema,
   slot2: PlayerSlotSchema.extend({ isAiMode: z.boolean() }),
-  game: GameStateSchema.nullable(),
+  game: GameStateSchema.extend({ canWinOnHold: z.boolean().default(false) }).nullable(),
 });
 
 function otherSlot(slot: SlotId): SlotId {
   return slot === 'slot1' ? 'slot2' : 'slot1';
+}
+
+/** Career totals come from the finished game, never from adding 1 on the client. */
+function winsFromGame(user: UserDto | null, game: GameStateDto): UserDto | null {
+  if (user === null) {
+    return null;
+  }
+  const match = [game.players.player1, game.players.player2].find((player) => player.id === user.id);
+  return match === undefined || match.wins === user.wins ? user : { ...user, wins: match.wins };
 }
 
 export const useArenaStore = create<ArenaStore>()(
@@ -86,7 +99,16 @@ export const useArenaStore = create<ArenaStore>()(
       },
 
       setGame: (game) => {
-        set({ game });
+        if (game === null || game.status !== 'FINISHED') {
+          set({ game });
+          return;
+        }
+        const { slot1, slot2 } = get();
+        set({
+          game,
+          slot1: { ...slot1, user: winsFromGame(slot1.user, game) },
+          slot2: { ...slot2, user: winsFromGame(slot2.user, game) },
+        });
       },
 
       setActionLocked: (isActionLocked) => {

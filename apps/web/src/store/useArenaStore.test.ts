@@ -95,6 +95,43 @@ describe('useArenaStore', () => {
 
       expect(useArenaStore.getState().isActionLocked).toBe(true);
     });
+
+    it('copies career wins from a finished game onto the matching slots', () => {
+      const { setSession, selectAiOpponent, setGame } = useArenaStore.getState();
+      setSession('slot1', { user: alice, accessToken: 'alice-token' });
+      selectAiOpponent(robo);
+
+      setGame(
+        gameState({
+          status: 'FINISHED',
+          winnerId: alice.id,
+          lastOutcome: 'WIN',
+          players: {
+            player1: { ...seat(alice, 100), wins: 3 },
+            player2: { ...seat(robo, 40), wins: 6 },
+          },
+        }),
+      );
+
+      const { slot1, slot2 } = useArenaStore.getState();
+      expect(slot1.user).toEqual({ ...alice, wins: 3 });
+      expect(slot2).toEqual({ user: { ...robo, wins: 6 }, token: null, isAiMode: true });
+    });
+
+    it('leaves slot wins unchanged while the game is still active', () => {
+      const { setSession, setGame } = useArenaStore.getState();
+      setSession('slot1', { user: alice, accessToken: 'alice-token' });
+      setSession('slot2', { user: bob, accessToken: 'bob-token' });
+
+      setGame(
+        gameState({
+          players: { player1: { ...seat(alice, 20), wins: 99 }, player2: { ...seat(bob, 10), wins: 50 } },
+        }),
+      );
+
+      expect(useArenaStore.getState().slot1.user?.wins).toBe(alice.wins);
+      expect(useArenaStore.getState().slot2.user?.wins).toBe(bob.wins);
+    });
   });
 
   describe('persistence', () => {
@@ -124,6 +161,22 @@ describe('useArenaStore', () => {
       await useArenaStore.persist.rehydrate();
 
       expect(useArenaStore.getState()).toMatchObject({ ...saved, isActionLocked: false });
+    });
+
+    it('restores a saved game that predates canWinOnHold', async () => {
+      const legacyGame = { ...gameState() } as Record<string, unknown>;
+      delete legacyGame.canWinOnHold;
+      const saved = {
+        slot1: { user: alice, token: 'alice-token' },
+        slot2: { user: bob, token: 'bob-token', isAiMode: false },
+        game: legacyGame,
+      };
+      localStorage.setItem(ARENA_STORAGE_KEY, JSON.stringify({ state: saved, version: 0 }));
+
+      await useArenaStore.persist.rehydrate();
+
+      expect(useArenaStore.getState().game).toEqual({ ...gameState(), canWinOnHold: false });
+      expect(useArenaStore.getState().slot1.user).toEqual(alice);
     });
 
     it('discards saved state that no longer matches the shared contracts', async () => {

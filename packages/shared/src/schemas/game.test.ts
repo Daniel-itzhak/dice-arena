@@ -69,6 +69,7 @@ describe('GameStateSchema', () => {
     lastOutcome: null,
     winnerId: null,
     version: 0,
+    canWinOnHold: false,
     players: {
       player1: { id: 'u1', username: 'alice', isAi: false, wins: 3, globalScore: 0 },
       player2: { id: 'u2', username: 'DiceBot', isAi: true, wins: 0, globalScore: 0 },
@@ -106,6 +107,10 @@ describe('GameStateSchema', () => {
   it('rejects unknown statuses and outcomes', () => {
     expect(GameStateSchema.safeParse({ ...freshGame, status: 'PAUSED' }).success).toBe(false);
     expect(GameStateSchema.safeParse({ ...freshGame, lastOutcome: 'BUST' }).success).toBe(false);
+  });
+
+  it.each([undefined, 'yes', 1])('rejects canWinOnHold %j', (canWinOnHold) => {
+    expect(GameStateSchema.safeParse({ ...freshGame, canWinOnHold }).success).toBe(false);
   });
 
   describe('AiStepResponseSchema', () => {

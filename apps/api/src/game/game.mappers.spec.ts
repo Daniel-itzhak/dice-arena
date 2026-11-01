@@ -16,8 +16,8 @@ const record: GameRecord = {
   lastOutcome: 'STANDARD',
   winnerId: null,
   version: 4,
-  player1: { id: 'u1', username: 'alice', isAi: false },
-  player2: { id: 'u2', username: 'RoboRoller', isAi: true },
+  player1: { id: 'u1', username: 'alice', isAi: false, wins: 3 },
+  player2: { id: 'u2', username: 'RoboRoller', isAi: true, wins: 8 },
 };
 
 describe('toGameState', () => {
@@ -33,8 +33,8 @@ describe('toGameState', () => {
       winnerId: null,
       version: 4,
       players: {
-        player1: { id: 'u1', username: 'alice', isAi: false, globalScore: 12 },
-        player2: { id: 'u2', username: 'RoboRoller', isAi: true, globalScore: 7 },
+        player1: { id: 'u1', username: 'alice', isAi: false, wins: 3, globalScore: 12 },
+        player2: { id: 'u2', username: 'RoboRoller', isAi: true, wins: 8, globalScore: 7 },
       },
     });
   });
@@ -45,13 +45,13 @@ describe('toGameState', () => {
       lastDie1: null,
       lastDie2: 4,
       createdAt: new Date(0),
-      player1: { ...record.player1, passwordHash: 'secret-hash', wins: 3 },
+      player1: { ...record.player1, passwordHash: 'secret-hash', gamesPlayed: 9 },
     };
 
     const state = toGameState(stored);
     expect(state.lastRoll).toBeNull();
     expect(JSON.stringify(state)).not.toContain('secret-hash');
     expect(JSON.stringify(state)).not.toContain('passwordHash');
-    expect(state.players.player1).toStrictEqual({ id: 'u1', username: 'alice', isAi: false, globalScore: 12 });
+    expect(state.players.player1).toStrictEqual({ id: 'u1', username: 'alice', isAi: false, wins: 3, globalScore: 12 });
   });
 });

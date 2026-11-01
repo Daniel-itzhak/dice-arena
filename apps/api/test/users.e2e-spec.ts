@@ -1,4 +1,10 @@
-import { AI_PLAYER_USERNAME, LEADERBOARD_SIZE, LeaderboardSchema, type LeaderboardDto } from '@dice-arena/shared';
+import {
+  AI_PLAYER_USERNAME,
+  LEADERBOARD_SIZE,
+  LeaderboardSchema,
+  UserSchema,
+  type LeaderboardDto,
+} from '@dice-arena/shared';
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import type { App } from 'supertest/types.js';
@@ -71,6 +77,26 @@ describe('Users (e2e)', () => {
         expect(leaderboard.map((entry) => entry.id)).not.toContain(ai.id);
       } finally {
         await prisma.user.update({ where: { id: ai.id }, data: { wins: ai.wins, gamesPlayed: ai.gamesPlayed } });
+      }
+    });
+  });
+
+  describe('GET /api/users/ai', () => {
+    it('publicly returns the AI player profile without credentials', async () => {
+      const ai = await prisma.user.findUniqueOrThrow({ where: { username: AI_PLAYER_USERNAME } });
+
+      const { body } = await request(app.getHttpServer()).get('/api/users/ai').expect(200);
+
+      expect(body).toStrictEqual({ id: ai.id, username: AI_PLAYER_USERNAME, wins: ai.wins, isAi: true });
+      expect(UserSchema.safeParse(body).success).toBe(true);
+    });
+
+    it('responds 404 instead of offering a human account as the AI', async () => {
+      await prisma.user.update({ where: { username: AI_PLAYER_USERNAME }, data: { isAi: false } });
+      try {
+        await request(app.getHttpServer()).get('/api/users/ai').expect(404);
+      } finally {
+        await prisma.user.update({ where: { username: AI_PLAYER_USERNAME }, data: { isAi: true } });
       }
     });
   });

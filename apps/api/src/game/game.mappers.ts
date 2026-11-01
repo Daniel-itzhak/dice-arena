@@ -11,6 +11,7 @@ export interface GamePlayerRecord {
   id: string;
   username: string;
   isAi: boolean;
+  wins: number;
 }
 
 /** Columns the game rules read and write, plus the two public player profiles. */
@@ -34,7 +35,7 @@ export interface GameRecord {
 }
 
 function toPlayer(player: GamePlayerRecord, globalScore: number): PlayerStateDto {
-  return { id: player.id, username: player.username, isAi: player.isAi, globalScore };
+  return { id: player.id, username: player.username, isAi: player.isAi, wins: player.wins, globalScore };
 }
 
 function toLastRoll(die1: number | null, die2: number | null): DiceRoll | null {

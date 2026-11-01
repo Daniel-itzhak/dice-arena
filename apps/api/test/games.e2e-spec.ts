@@ -104,8 +104,8 @@ describe('Games (e2e)', () => {
         winnerId: null,
         version: 1,
         players: {
-          player1: { id: player1.id, username: player1.username, isAi: false, globalScore: 0 },
-          player2: { id: player2.id, username: player2.username, isAi: false, globalScore: 0 },
+          player1: { id: player1.id, username: player1.username, isAi: false, wins: 0, globalScore: 0 },
+          player2: { id: player2.id, username: player2.username, isAi: false, wins: 0, globalScore: 0 },
         },
       });
       expect(response.text).not.toContain('passwordHash');
@@ -365,7 +365,7 @@ describe('Games (e2e)', () => {
         activePlayerId: player1.id,
         winnerId: player1.id,
         version: 6,
-        players: { player1: { globalScore: 20 }, player2: { globalScore: 0 } },
+        players: { player1: { globalScore: 20, wins: 1 }, player2: { globalScore: 0, wins: 0 } },
       });
 
       const [winner, loser, row] = await Promise.all([

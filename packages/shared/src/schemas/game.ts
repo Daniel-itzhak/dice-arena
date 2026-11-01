@@ -16,7 +16,7 @@ export const RollOutcomeSchema = z.enum(['STANDARD', 'DOUBLE_SIX', 'HOLD', 'WIN'
 export type RollOutcome = z.infer<typeof RollOutcomeSchema>;
 
 export const TargetScoreSchema = z
-  .int()
+  .int('Target score must be a whole number')
   .min(MIN_TARGET_SCORE, `Target score must be at least ${MIN_TARGET_SCORE}`)
   .max(MAX_TARGET_SCORE, `Target score must be at most ${MAX_TARGET_SCORE}`);
 
@@ -54,6 +54,8 @@ export const PlayerStateSchema = z.object({
   id: EntityIdSchema,
   username: z.string(),
   isAi: z.boolean(),
+  /** Career wins across every game; already includes this game once it has been won. */
+  wins: z.int().nonnegative(),
   globalScore: ScoreSchema,
 });
 export type PlayerStateDto = z.infer<typeof PlayerStateSchema>;

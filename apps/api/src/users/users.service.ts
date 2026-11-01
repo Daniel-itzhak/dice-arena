@@ -1,5 +1,5 @@
-import { LEADERBOARD_SIZE, type LeaderboardEntryDto, type UserDto } from '@dice-arena/shared';
-import { ConflictException, Injectable } from '@nestjs/common';
+import { AI_PLAYER_USERNAME, LEADERBOARD_SIZE, type LeaderboardEntryDto, type UserDto } from '@dice-arena/shared';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { toLeaderboardEntry, toUserDto } from './users.mappers.js';
@@ -39,6 +39,21 @@ export class UsersService {
       select: { ...PROFILE_SELECT, passwordHash: true },
     });
     return user && { profile: toUserDto(user), passwordHash: user.passwordHash };
+  }
+
+  /**
+   * Public profile of the built-in AI opponent, so clients can name it as `player2Id` in a vs-AI game.
+   * @throws NotFoundException if the AI account is missing or has been turned into a human account.
+   */
+  async getAiPlayer(): Promise<UserDto> {
+    const ai = await this.prisma.user.findFirst({
+      where: { username: AI_PLAYER_USERNAME, isAi: true },
+      select: PROFILE_SELECT,
+    });
+    if (!ai) {
+      throw new NotFoundException('The AI player is not available');
+    }
+    return toUserDto(ai);
   }
 
   /**

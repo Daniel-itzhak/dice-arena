@@ -1,5 +1,5 @@
-import type { GameStateDto } from '@dice-arena/shared';
 import { useState } from 'react';
+import { GameArena } from './components/game/GameArena';
 import { LeaderboardModal } from './components/leaderboard/LeaderboardModal';
 import { DualAuthPanel } from './components/lobby/DualAuthPanel';
 import { SECONDARY_BUTTON } from './components/ui/buttonStyles';
@@ -25,30 +25,9 @@ export function App() {
         </div>
       </header>
       <main className="mx-auto max-w-5xl px-6 py-10">
-        {game === null ? <DualAuthPanel /> : <MatchSummary game={game} />}
+        {game === null ? <DualAuthPanel /> : <GameArena game={game} />}
       </main>
       <LeaderboardModal open={leaderboardOpen} onClose={() => setLeaderboardOpen(false)} />
     </div>
-  );
-}
-
-/** Stand-in for the game board: confirms the server created the match and offers a way back to the lobby. */
-function MatchSummary({ game }: { game: GameStateDto }) {
-  const setGame = useArenaStore((state) => state.setGame);
-  const { player1, player2 } = game.players;
-
-  return (
-    <section className="mx-auto flex max-w-xl flex-col items-center gap-4 rounded-3xl border border-slate-800 bg-slate-900/70 p-8 text-center">
-      <p className="text-xs font-bold uppercase tracking-[0.3em] text-emerald-300">
-        {game.status === 'ACTIVE' ? 'Match in progress' : 'Match finished'}
-      </p>
-      <h2 className="text-3xl font-black">
-        {player1.username} vs {player2.username}
-      </h2>
-      <p className="text-slate-400">First to {game.targetScore} points</p>
-      <button type="button" onClick={() => setGame(null)} className={SECONDARY_BUTTON}>
-        Back to lobby
-      </button>
-    </section>
   );
 }

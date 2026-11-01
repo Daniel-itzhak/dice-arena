@@ -54,6 +54,8 @@ export const PlayerStateSchema = z.object({
   id: EntityIdSchema,
   username: z.string(),
   isAi: z.boolean(),
+  /** Career wins across every game; already includes this game once it has been won. */
+  wins: z.int().nonnegative(),
   globalScore: ScoreSchema,
 });
 export type PlayerStateDto = z.infer<typeof PlayerStateSchema>;

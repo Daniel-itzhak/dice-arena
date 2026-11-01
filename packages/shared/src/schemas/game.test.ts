@@ -70,8 +70,8 @@ describe('GameStateSchema', () => {
     winnerId: null,
     version: 0,
     players: {
-      player1: { id: 'u1', username: 'alice', isAi: false, globalScore: 0 },
-      player2: { id: 'u2', username: 'DiceBot', isAi: true, globalScore: 0 },
+      player1: { id: 'u1', username: 'alice', isAi: false, wins: 3, globalScore: 0 },
+      player2: { id: 'u2', username: 'DiceBot', isAi: true, wins: 0, globalScore: 0 },
     },
   };
 
@@ -97,6 +97,11 @@ describe('GameStateSchema', () => {
       expect(GameStateSchema.safeParse({ ...freshGame, lastRoll }).success).toBe(false);
     },
   );
+
+  it.each([undefined, -1, 1.5])('rejects player wins %j', (wins) => {
+    const players = { ...freshGame.players, player1: { ...freshGame.players.player1, wins } };
+    expect(GameStateSchema.safeParse({ ...freshGame, players }).success).toBe(false);
+  });
 
   it('rejects unknown statuses and outcomes', () => {
     expect(GameStateSchema.safeParse({ ...freshGame, status: 'PAUSED' }).success).toBe(false);

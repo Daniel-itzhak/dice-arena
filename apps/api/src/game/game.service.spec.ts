@@ -324,8 +324,8 @@ describe('GameService', () => {
         winnerId: null,
         version: 1,
         players: {
-          player1: { id: alice.id, username: 'alice', isAi: false, globalScore: 0 },
-          player2: { id: bob.id, username: 'bob', isAi: false, globalScore: 0 },
+          player1: { id: alice.id, username: 'alice', isAi: false, wins: 0, globalScore: 0 },
+          player2: { id: bob.id, username: 'bob', isAi: false, wins: 0, globalScore: 0 },
         },
       });
       expect(store.stats(alice.id)).toEqual({ wins: 0, gamesPlayed: 0 });
@@ -526,7 +526,7 @@ describe('GameService', () => {
         activePlayerId: alice.id,
         winnerId: alice.id,
         version: 3,
-        players: { player1: { globalScore: score }, player2: { globalScore: 0 } },
+        players: { player1: { globalScore: score, wins: 1 }, player2: { globalScore: 0, wins: 0 } },
       });
       expect(store.stats(alice.id)).toEqual({ wins: 1, gamesPlayed: 1 });
       expect(store.stats(bob.id)).toEqual({ wins: 0, gamesPlayed: 1 });
@@ -630,7 +630,7 @@ describe('GameService', () => {
         lastOutcome: 'WIN',
         activePlayerId: robo.id,
         winnerId: robo.id,
-        players: { player1: { globalScore: 10 }, player2: { globalScore: 0 } },
+        players: { player1: { globalScore: 10, wins: 1 }, player2: { globalScore: 0, wins: 0 } },
       });
       expect(store.stats(robo.id)).toEqual({ wins: 1, gamesPlayed: 1 });
       expect(store.stats(alice.id)).toEqual({ wins: 0, gamesPlayed: 1 });

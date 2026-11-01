@@ -17,7 +17,7 @@ const WRITE_CONFLICT = 'P2034';
 
 const STALE_GAME_MESSAGE = 'The game changed before this action could be applied';
 
-const playerSelect = { id: true, username: true, isAi: true } satisfies Prisma.UserSelect;
+const playerSelect = { id: true, username: true, isAi: true, wins: true } satisfies Prisma.UserSelect;
 
 const gameInclude = {
   player1: { select: playerSelect },
@@ -155,10 +155,12 @@ export class GameService {
         : { activePlayerId: otherPlayerId(game, playerId), lastOutcome: 'HOLD' as const }),
     });
 
-    if (won) {
-      await this.recordFinishedGame(tx, playerId, otherPlayerId(game, playerId));
+    if (!won) {
+      return saved;
     }
-    return saved;
+    await this.recordFinishedGame(tx, playerId, otherPlayerId(game, playerId));
+    // `saved` was read before the win was recorded, so its player profiles still have the old `wins`.
+    return this.requireGame(tx, game.id);
   }
 
   private async insertGame(player1Id: string, player2Id: string, targetScore: number): Promise<GameStateDto> {

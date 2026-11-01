@@ -279,15 +279,15 @@ Everything is synthesised in `apps/web/src/audio/soundEngine.ts`; the app ships 
 | `playHold()` | `HOLD` | Ascending C-major triad (C5–E5–G5), triangle waves, each note ringing slightly longer than the last. |
 | `playDoubleSix()` | `DOUBLE_SIX` | Three sawtooth oscillators (root, a detuned copy for slow beating, and a tritone) sliding down two octaves through a closing low-pass filter. |
 | `playWin()` | `WIN` | Six-note rising arpeggio that lands on a sustained C-major chord doubled with a quiet sawtooth for a brassy edge. |
-| `toggleAmbientMusic()` | Nav-bar **Music** button | A low-volume pad: four voices of two detuned triangles, a slow LFO drifting the filter cutoff, and sparse sine "sparkles" two octaves up, cycling Am–F–C–G every 16 s with the next pass scheduled 2 s ahead. |
-| `toggleMute()` | Nav-bar **Mute / Unmute** button | Ramps the master bus to 0 or 1 (sound effects and music together). |
+| `toggleAmbientMusic()` | Nav-bar **Music on / Music off** button | A brighter C-major pad: four voices of two detuned triangles, a slow LFO drifting the filter cutoff, and sparse sine "sparkles" two octaves up, cycling C–G–F–C every 16 s with the next pass scheduled 2 s ahead. Music starts **off**; roll/hold/win cues still play either way. |
 
 Design notes:
 
 - `GameArena` maps the server's `lastOutcome` to a cue after every successful roll, hold, or AI step. Nothing plays on a rejected request, and nothing is predicted before the response.
-- Browsers keep an `AudioContext` silent until a user gesture, so the context is created lazily on the first cue or toggle and, after a reload, the music waits for the first pointer/key event (`armOnFirstGesture`).
-- Preferences (`muted`, `musicEnabled`) persist in `localStorage` under `dice-arena:audio`, validated with Zod on load, and React reads them through `useSyncExternalStore` (`useAudioSettings`).
-- Where the Web Audio API is missing (older browsers, the test environment) every function is a silent no-op and the toggles are disabled with an explanatory tooltip.
+- There is a single nav control. Music on/off is only the ambient loop; dice cues are independent so a second Mute button would feel identical until you rolled.
+- Browsers keep an `AudioContext` silent until a user gesture, so the context is created lazily on the first cue or toggle and, after a reload with music already enabled, the loop waits for the first pointer/key event (`armOnFirstGesture`). A Music click is excluded from that unlock so it cannot start the loop and then immediately toggle it off.
+- Preferences (`muted`, `musicEnabled`) persist in `localStorage` under `dice-arena:audio:v2`, validated with Zod on load, and React reads them through `useSyncExternalStore` (`useAudioSettings`).
+- Where the Web Audio API is missing (older browsers, the test environment) every function is a silent no-op and the toggle is disabled with an explanatory tooltip.
 
 ## Configuration
 

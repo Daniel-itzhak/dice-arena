@@ -20,18 +20,21 @@ export interface AudioSettings {
   musicEnabled: boolean;
 }
 
-export const AUDIO_STORAGE_KEY = 'dice-arena:audio';
+export const AUDIO_STORAGE_KEY = 'dice-arena:audio:v2';
 
-const DEFAULT_SETTINGS: AudioSettings = { muted: false, musicEnabled: true };
+/** Marks the Music button so a first-gesture unlock does not start the loop on the same click that toggles it. */
+export const AUDIO_CONTROL_SELECTOR = '[data-audio-control]';
+
+const DEFAULT_SETTINGS: AudioSettings = { muted: false, musicEnabled: false };
 
 /** Anything in localStorage that fails this schema (tampered, or written by an older build) is discarded. */
 const AudioSettingsSchema = z.object({ muted: z.boolean(), musicEnabled: z.boolean() });
 
-/** Sound-effect bus level; the ambient bus sits far below it so music never masks a roll. */
+/** Sound-effect bus level; the ambient bus sits below it so music never masks a roll. */
 const SFX_LEVEL = 0.8;
-const MUSIC_LEVEL = 0.11;
-const MUSIC_FADE_IN_SECONDS = 2.5;
-const MUSIC_FADE_OUT_SECONDS = 0.5;
+const MUSIC_LEVEL = 0.22;
+const MUSIC_FADE_IN_SECONDS = 0.35;
+const MUSIC_FADE_OUT_SECONDS = 0.35;
 /** Time constant for mute and unmute, long enough that the master bus never clicks. */
 const MUTE_RAMP_SECONDS = 0.02;
 /** Exponential ramps cannot reach 0, so envelopes decay to this instead. */
@@ -79,12 +82,12 @@ const WIN_NOTE_SPACING_SECONDS = 0.1;
 const WIN_CHORD: readonly number[] = [NOTE.C5, NOTE.E5, NOTE.G5, NOTE.C6];
 
 type Chord = readonly [number, number, number, number];
-/** Am, F, C, G: a slow four-bar progression in low register that loops without a seam. */
+/** C, G, F, C: a bright major I–V–IV–I loop so the lobby reads as a game theme, not a minor drone. */
 const AMBIENT_PROGRESSION: readonly Chord[] = [
-  [NOTE.A2, NOTE.E3, NOTE.A3, NOTE.C4],
-  [NOTE.F2, NOTE.C3, NOTE.F3, NOTE.A3],
   [NOTE.C3, NOTE.G3, NOTE.C4, NOTE.E4],
   [NOTE.G2, NOTE.D3, NOTE.G3, NOTE.B3],
+  [NOTE.F2, NOTE.C3, NOTE.F3, NOTE.A3],
+  [NOTE.C3, NOTE.G3, NOTE.C4, NOTE.E4],
 ];
 const AMBIENT_CHORD_SECONDS = 4;
 const AMBIENT_LOOP_SECONDS = AMBIENT_PROGRESSION.length * AMBIENT_CHORD_SECONDS;
@@ -163,7 +166,7 @@ export function toggleMute(): void {
   syncAmbient();
 }
 
-/** Starts or stops the low-volume ambient loop. It stays silent while muted and resumes on unmute. */
+/** Starts or stops the ambient loop. It stays silent while muted and resumes on unmute. */
 export function toggleAmbientMusic(): void {
   updateSettings({ musicEnabled: !settings.musicEnabled });
   if (settings.musicEnabled && !settings.muted) {
@@ -184,7 +187,13 @@ export function armOnFirstGesture(): () => void {
     window.removeEventListener('pointerdown', unlock);
     window.removeEventListener('keydown', unlock);
   };
-  const unlock = (): void => {
+  const unlock = (event: Event): void => {
+    const target = event.target;
+    // The Music button owns this gesture: starting here would race its click and immediately stop the loop.
+    if (target instanceof Element && target.closest(AUDIO_CONTROL_SELECTOR) !== null) {
+      disarm();
+      return;
+    }
     disarm();
     if (!settings.muted && settings.musicEnabled) {
       ensureEngine();

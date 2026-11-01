@@ -38,7 +38,7 @@ describe('soundEngine', () => {
         engine.toggleAmbientMusic();
         engine.toggleMute();
       }).not.toThrow();
-      expect(engine.getAudioSettings()).toEqual({ muted: true, musicEnabled: false });
+      expect(engine.getAudioSettings()).toEqual({ muted: true, musicEnabled: true });
     });
   });
 
@@ -76,7 +76,6 @@ describe('soundEngine', () => {
 
     it('plays the hold as three rising notes and the double six as descending sawtooth waves', async () => {
       const engine = await loadEngine();
-      engine.toggleAmbientMusic(); // Keep the pad out of the oscillator list.
 
       engine.playHold();
       const context = onlyAudioContext();
@@ -116,10 +115,21 @@ describe('soundEngine', () => {
       expect(master?.gain.setTargetAtTime).toHaveBeenLastCalledWith(1, expect.any(Number), expect.any(Number));
     });
 
-    it('starts the ambient pad with the first context and stops it when music is turned off', async () => {
+    it('does not start the pad until music is turned on', async () => {
       const engine = await loadEngine();
 
       engine.playHold();
+      expect(padOscillators(onlyAudioContext())).toHaveLength(0);
+
+      engine.toggleAmbientMusic();
+      expect(engine.getAudioSettings().musicEnabled).toBe(true);
+      expect(padOscillators(onlyAudioContext())).toHaveLength(8);
+    });
+
+    it('starts the ambient pad when music is turned on and stops it when turned off', async () => {
+      const engine = await loadEngine();
+
+      engine.toggleAmbientMusic();
       const context = onlyAudioContext();
       const pad = padOscillators(context);
       expect(pad).toHaveLength(8);
@@ -135,7 +145,7 @@ describe('soundEngine', () => {
 
     it('silences the pad while muted and brings it back on unmute', async () => {
       const engine = await loadEngine();
-      engine.playHold();
+      engine.toggleAmbientMusic();
       const context = onlyAudioContext();
 
       engine.toggleMute();
@@ -148,7 +158,7 @@ describe('soundEngine', () => {
     it('schedules the next pass of the progression before the current one ends', async () => {
       vi.useFakeTimers();
       const engine = await loadEngine();
-      engine.playHold();
+      engine.toggleAmbientMusic();
       const context = onlyAudioContext();
       const sparklesPerLoop = sparkleOscillators(context).length;
       expect(sparklesPerLoop).toBe(8);
@@ -158,7 +168,8 @@ describe('soundEngine', () => {
       expect(sparkleOscillators(context)).toHaveLength(sparklesPerLoop * 2);
     });
 
-    it('waits for the first gesture after a reload before starting the music', async () => {
+    it('waits for the first gesture after a reload before restarting enabled music', async () => {
+      localStorage.setItem('dice-arena:audio:v2', JSON.stringify({ muted: false, musicEnabled: true }));
       const engine = await loadEngine();
       const disarm = engine.armOnFirstGesture();
       expect(FakeAudioContext.instances).toHaveLength(0);
@@ -171,9 +182,23 @@ describe('soundEngine', () => {
       disarm();
     });
 
-    it('does not start anything on the first gesture when muted', async () => {
+    it('does not start music when the first gesture is a Music click', async () => {
+      localStorage.setItem('dice-arena:audio:v2', JSON.stringify({ muted: false, musicEnabled: true }));
       const engine = await loadEngine();
-      engine.toggleMute();
+      const disarm = engine.armOnFirstGesture();
+      const control = document.createElement('button');
+      control.setAttribute('data-audio-control', '');
+      document.body.append(control);
+
+      control.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+
+      expect(FakeAudioContext.instances).toHaveLength(0);
+      control.remove();
+      disarm();
+    });
+
+    it('does not start anything on the first gesture when music is off', async () => {
+      const engine = await loadEngine();
       const disarm = engine.armOnFirstGesture();
 
       window.dispatchEvent(new Event('keydown'));
@@ -184,25 +209,25 @@ describe('soundEngine', () => {
   });
 
   describe('settings', () => {
-    it('defaults to unmuted with music on', async () => {
+    it('defaults to unmuted with music off', async () => {
       const engine = await loadEngine();
-      expect(engine.getAudioSettings()).toEqual({ muted: false, musicEnabled: true });
+      expect(engine.getAudioSettings()).toEqual({ muted: false, musicEnabled: false });
     });
 
     it('persists every change and restores it on the next load', async () => {
       const engine = await loadEngine();
       engine.toggleMute();
       engine.toggleAmbientMusic();
-      expect(JSON.parse(localStorage.getItem(engine.AUDIO_STORAGE_KEY) ?? '')).toEqual({ muted: true, musicEnabled: false });
+      expect(JSON.parse(localStorage.getItem(engine.AUDIO_STORAGE_KEY) ?? '')).toEqual({ muted: true, musicEnabled: true });
 
       const reloaded = await loadEngine();
-      expect(reloaded.getAudioSettings()).toEqual({ muted: true, musicEnabled: false });
+      expect(reloaded.getAudioSettings()).toEqual({ muted: true, musicEnabled: true });
     });
 
     it('falls back to the defaults when the stored value is not valid', async () => {
-      localStorage.setItem('dice-arena:audio', '{"muted":"yes"}');
+      localStorage.setItem('dice-arena:audio:v2', '{"muted":"yes"}');
       const engine = await loadEngine();
-      expect(engine.getAudioSettings()).toEqual({ muted: false, musicEnabled: true });
+      expect(engine.getAudioSettings()).toEqual({ muted: false, musicEnabled: false });
     });
 
     it('notifies subscribers on each change until they unsubscribe', async () => {

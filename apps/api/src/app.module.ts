@@ -6,6 +6,7 @@ import { AuthModule } from './auth/auth.module.js';
 import { DEFAULT_RATE_LIMIT } from './common/throttling.js';
 import { validateEnv } from './config/env.js';
 import { ENV_FILE_PATH } from './config/paths.js';
+import { GameModule } from './game/game.module.js';
 import { HealthModule } from './health/health.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { UsersModule } from './users/users.module.js';
@@ -24,6 +25,7 @@ import { UsersModule } from './users/users.module.js';
     PrismaModule,
     UsersModule,
     AuthModule,
+    GameModule,
     HealthModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

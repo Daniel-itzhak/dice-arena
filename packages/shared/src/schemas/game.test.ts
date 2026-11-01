@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_TARGET_SCORE } from '../constants';
-import { CreateGameSchema, GameStateSchema, type GameStateDto } from './game';
+import { CreateGameSchema, GameStateSchema, ResetGameSchema, type GameStateDto } from './game';
 
 describe('CreateGameSchema', () => {
   const base = { player1Id: 'u1', player2Id: 'u2', isVsAi: false };
@@ -25,6 +25,20 @@ describe('CreateGameSchema', () => {
     const result = CreateGameSchema.safeParse({ ...base, player2Id: 'u1' });
     expect(result.success).toBe(false);
     expect(result.error?.issues[0]?.path).toEqual(['player2Id']);
+  });
+});
+
+describe('ResetGameSchema', () => {
+  it('allows an empty body so the previous target score can be kept', () => {
+    expect(ResetGameSchema.parse({})).toEqual({});
+  });
+
+  it('accepts a replacement target score and strips unknown keys', () => {
+    expect(ResetGameSchema.parse({ targetScore: 50, again: true })).toEqual({ targetScore: 50 });
+  });
+
+  it.each([9, 1001, 10.5, null])('rejects targetScore %j', (targetScore) => {
+    expect(ResetGameSchema.safeParse({ targetScore }).success).toBe(false);
   });
 });
 

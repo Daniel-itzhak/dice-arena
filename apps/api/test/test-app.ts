@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import type { INestApplication, ModuleMetadata } from '@nestjs/common';
-import { Test } from '@nestjs/testing';
+import { Test, type TestingModuleBuilder } from '@nestjs/testing';
 import type { App } from 'supertest/types.js';
 import { AppModule } from '../src/app.module.js';
 import { configureApp } from '../src/app.setup.js';
@@ -9,8 +9,14 @@ import { configureApp } from '../src/app.setup.js';
 export async function createTestApp({
   imports = [],
   controllers = [],
-}: Pick<ModuleMetadata, 'imports' | 'controllers'> = {}): Promise<INestApplication<App>> {
-  const moduleRef = await Test.createTestingModule({ imports: [AppModule, ...imports], controllers }).compile();
+  configure,
+}: Pick<ModuleMetadata, 'imports' | 'controllers'> & {
+  /** Adjust providers before the module is compiled, for example to replace the dice. */
+  configure?: (builder: TestingModuleBuilder) => void;
+} = {}): Promise<INestApplication<App>> {
+  const builder = Test.createTestingModule({ imports: [AppModule, ...imports], controllers });
+  configure?.(builder);
+  const moduleRef = await builder.compile();
   const app = moduleRef.createNestApplication<INestApplication<App>>({ logger: false });
   configureApp(app);
   await app.init();

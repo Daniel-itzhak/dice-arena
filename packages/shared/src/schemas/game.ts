@@ -42,6 +42,13 @@ export type CreateGameInput = z.input<typeof CreateGameSchema>;
 /** Parsed request body with defaults applied. */
 export type CreateGameDto = z.output<typeof CreateGameSchema>;
 
+/** Body of a rematch request. Omit `targetScore` to keep the previous game's target. */
+export const ResetGameSchema = z.object({
+  targetScore: TargetScoreSchema.optional(),
+});
+export type ResetGameInput = z.input<typeof ResetGameSchema>;
+export type ResetGameDto = z.output<typeof ResetGameSchema>;
+
 export const PlayerStateSchema = z.object({
   /** User id; this is the value that `activePlayerId` and `winnerId` reference. */
   id: EntityIdSchema,

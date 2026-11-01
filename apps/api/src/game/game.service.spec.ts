@@ -5,11 +5,11 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import { Prisma } from '../generated/prisma/client.js';
 import type { PrismaService } from '../prisma/prisma.service.js';
 import { AiStrategyService } from './ai-strategy.service.js';
-import type { DiceService } from './dice.service.js';
+import { DiceService } from './dice.service.js';
 import { GameService } from './game.service.js';
 
 interface StoredUser {
@@ -261,17 +261,18 @@ class MemoryDb {
   }
 }
 
-function scriptedDice(rolls: readonly (readonly [number, number])[]): DiceService {
-  const queue: DiceRoll[] = rolls.map(([die1, die2]) => [die1, die2]);
-  return {
-    rollPair: () => {
-      const roll = queue.shift();
-      if (roll === undefined) {
-        throw new Error('unexpected roll');
-      }
-      return roll;
-    },
-  } as unknown as DiceService;
+type RollPairMock = MockInstance<() => DiceRoll>;
+
+/** A real DiceService whose `rollPair` returns `rolls` in order and fails the test on any extra roll. */
+function scriptedDice(rolls: readonly (readonly [number, number])[]): { dice: DiceService; rollPair: RollPairMock } {
+  const dice = new DiceService();
+  const rollPair = vi.spyOn(dice, 'rollPair').mockImplementation(() => {
+    throw new Error('unexpected roll');
+  });
+  for (const [die1, die2] of rolls) {
+    rollPair.mockReturnValueOnce([die1, die2]);
+  }
+  return { dice, rollPair };
 }
 
 function request(targetScore = 100): CreateGameDto {
@@ -286,8 +287,9 @@ function vsAi(targetScore = 100, aiSeat: 'player1' | 'player2' = 'player2'): Cre
 function serviceWith(
   rolls: readonly (readonly [number, number])[],
   store = new MemoryDb([alice, bob, robo]),
-): { service: GameService; store: MemoryDb } {
-  return { service: new GameService(store.asPrisma(), scriptedDice(rolls), new AiStrategyService()), store };
+): { service: GameService; store: MemoryDb; rollPair: RollPairMock } {
+  const { dice, rollPair } = scriptedDice(rolls);
+  return { service: new GameService(store.asPrisma(), dice, new AiStrategyService()), store, rollPair };
 }
 
 async function rejection(promise: Promise<unknown>): Promise<unknown> {
@@ -302,9 +304,10 @@ async function rejection(promise: Promise<unknown>): Promise<unknown> {
 describe('GameService', () => {
   let store: MemoryDb;
   let service: GameService;
+  let rollPair: RollPairMock;
 
   beforeEach(() => {
-    ({ service, store } = serviceWith([]));
+    ({ service, store, rollPair } = serviceWith([]));
   });
 
   describe('create', () => {
@@ -350,7 +353,7 @@ describe('GameService', () => {
     let game: GameStateDto;
 
     beforeEach(async () => {
-      ({ service, store } = serviceWith([
+      ({ service, store, rollPair } = serviceWith([
         [1, 2],
         [3, 4],
       ]));
@@ -373,7 +376,7 @@ describe('GameService', () => {
     });
 
     it('clears the round and switches turns on double six', async () => {
-      ({ service, store } = serviceWith([
+      ({ service, store, rollPair } = serviceWith([
         [5, 1],
         [6, 6],
       ]));
@@ -394,6 +397,25 @@ describe('GameService', () => {
       expect(await rejection(service.roll(game.id, alice.id))).toBeInstanceOf(ForbiddenException);
     });
 
+    it.each([
+      [6, 5],
+      [5, 6],
+      [1, 1],
+      [5, 5],
+    ] as const)('counts %i and %i as a standard roll, since only two sixes end the turn', async (die1, die2) => {
+      ({ service, store, rollPair } = serviceWith([[die1, die2]]));
+      game = await service.create(alice.id, request());
+
+      const rolled = await service.roll(game.id, alice.id);
+
+      expect(rolled).toMatchObject({
+        roundScore: die1 + die2,
+        lastRoll: [die1, die2],
+        lastOutcome: 'STANDARD',
+        activePlayerId: alice.id,
+      });
+    });
+
     it('refuses another player, a finished game, and an unknown game without rolling', async () => {
       expect(await rejection(service.roll(game.id, bob.id))).toMatchObject({ message: 'Not your turn' });
       expect(store.storedGame(game.id).version).toBe(1);
@@ -402,6 +424,7 @@ describe('GameService', () => {
       expect(await rejection(service.roll(game.id, alice.id))).toMatchObject({ message: 'Game is already finished' });
       expect(await rejection(service.roll('missing', alice.id))).toBeInstanceOf(NotFoundException);
       expect(store.storedGame(game.id)).toMatchObject({ version: 1, currentRoundScore: 0, lastDie1: null });
+      expect(rollPair).not.toHaveBeenCalled();
     });
   });
 
@@ -416,8 +439,8 @@ describe('GameService', () => {
     });
 
     it('banks the round, keeps the last roll, and passes the turn when the target is still ahead', async () => {
-      ({ service, store } = serviceWith([[4, 5]]));
-      const game = await service.create(alice.id, request(20));
+      ({ service, store, rollPair } = serviceWith([[4, 5]]));
+      const game = await service.create(alice.id, request(10));
       await service.roll(game.id, alice.id);
 
       const held = await service.hold(game.id, alice.id);
@@ -436,11 +459,60 @@ describe('GameService', () => {
       expect(await rejection(service.hold(game.id, bob.id))).toBeInstanceOf(BadRequestException);
     });
 
+    it('adds each banked round to the score the player already has', async () => {
+      ({ service, store, rollPair } = serviceWith([
+        [4, 5],
+        [1, 1],
+        [3, 4],
+      ]));
+      const game = await service.create(alice.id, request());
+      await service.roll(game.id, alice.id);
+      await service.hold(game.id, alice.id);
+      await service.roll(game.id, bob.id);
+      await service.hold(game.id, bob.id);
+      await service.roll(game.id, alice.id);
+
+      const held = await service.hold(game.id, alice.id);
+
+      expect(held).toMatchObject({
+        status: 'ACTIVE',
+        roundScore: 0,
+        lastOutcome: 'HOLD',
+        activePlayerId: bob.id,
+        players: { player1: { globalScore: 16 }, player2: { globalScore: 2 } },
+      });
+    });
+
+    it("refuses player 2's roll and hold during player 1's turn and leaves player 1's round on the table", async () => {
+      ({ service, store, rollPair } = serviceWith([[3, 4]]));
+      const game = await service.create(alice.id, request());
+      await service.roll(game.id, alice.id);
+
+      const roll = await rejection(service.roll(game.id, bob.id));
+      const hold = await rejection(service.hold(game.id, bob.id));
+
+      for (const error of [roll, hold]) {
+        expect(error).toBeInstanceOf(ForbiddenException);
+        expect(error).toMatchObject({ message: 'Not your turn' });
+      }
+      expect(rollPair).toHaveBeenCalledTimes(1);
+      expect(store.storedGame(game.id)).toMatchObject({
+        activePlayerId: alice.id,
+        currentRoundScore: 7,
+        player1GlobalScore: 0,
+        player2GlobalScore: 0,
+        version: 2,
+      });
+      await expect(service.hold(game.id, alice.id)).resolves.toMatchObject({
+        players: { player1: { globalScore: 7 }, player2: { globalScore: 0 } },
+      });
+    });
+
     it.each([
       [10, [4, 6], 10],
       [10, [6, 5], 11],
     ] as const)('wins at target %i with a bank of %j (score %i) and records both players once', async (target, roll, score) => {
-      ({ service, store } = serviceWith([roll]));
+      ({ service, store, rollPair } = serviceWith([roll]));
       const game = await service.create(alice.id, request(target));
       await service.roll(game.id, alice.id);
 
@@ -463,7 +535,7 @@ describe('GameService', () => {
     });
 
     it('banks player 2 onto their own score when they are the one to reach the target', async () => {
-      ({ service, store } = serviceWith([
+      ({ service, store, rollPair } = serviceWith([
         [1, 1],
         [6, 5],
       ]));
@@ -488,7 +560,7 @@ describe('GameService', () => {
 
   describe('aiStep', () => {
     it('plays one roll per call, banks once the round reaches 21, and hands the turn back', async () => {
-      ({ service, store } = serviceWith([
+      ({ service, store, rollPair } = serviceWith([
         [1, 1],
         [5, 6],
         [4, 6],
@@ -528,7 +600,7 @@ describe('GameService', () => {
     });
 
     it('passes the turn to the human when the AI rolls a double six', async () => {
-      ({ service, store } = serviceWith([[6, 6]]));
+      ({ service, store, rollPair } = serviceWith([[6, 6]]));
       const game = await service.create(alice.id, vsAi(100, 'player1'));
 
       const bust = await service.aiStep(game.id, alice.id);
@@ -545,7 +617,7 @@ describe('GameService', () => {
     });
 
     it('holds to win as soon as the round reaches the target, and records both players', async () => {
-      ({ service, store } = serviceWith([[5, 5]]));
+      ({ service, store, rollPair } = serviceWith([[5, 5]]));
       const game = await service.create(alice.id, vsAi(10, 'player1'));
       await service.aiStep(game.id, alice.id);
 
@@ -566,7 +638,7 @@ describe('GameService', () => {
     });
 
     it("weighs the AI's own score and the human's score from the right seats", async () => {
-      ({ service, store } = serviceWith([[1, 1]]));
+      ({ service, store, rollPair } = serviceWith([[1, 1]]));
       const game = await service.create(alice.id, vsAi(100, 'player1'));
       Object.assign(store.storedGame(game.id), { player2GlobalScore: 85, currentRoundScore: 25 });
 
@@ -610,7 +682,7 @@ describe('GameService', () => {
 
   describe('reset', () => {
     it('opens a fresh rematch for either player and can change the target score', async () => {
-      ({ service, store } = serviceWith([[2, 2]]));
+      ({ service, store, rollPair } = serviceWith([[2, 2]]));
       const original = await service.create(alice.id, request(80));
       await service.roll(original.id, alice.id);
 
@@ -650,7 +722,7 @@ describe('GameService', () => {
 
   describe('concurrency', () => {
     it('applies only the roll that still matches the version it read', async () => {
-      ({ service, store } = serviceWith([
+      ({ service, store, rollPair } = serviceWith([
         [3, 3],
         [3, 3],
       ]));
@@ -677,7 +749,7 @@ describe('GameService', () => {
     });
 
     it('applies only one of two AI steps that arrive together', async () => {
-      ({ service, store } = serviceWith([
+      ({ service, store, rollPair } = serviceWith([
         [2, 3],
         [2, 3],
       ]));

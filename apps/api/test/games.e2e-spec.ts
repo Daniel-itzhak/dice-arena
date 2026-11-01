@@ -8,9 +8,10 @@ import {
   type GameStateDto,
 } from '@dice-arena/shared';
 import type { INestApplication } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import request, { type Response } from 'supertest';
 import type { App } from 'supertest/types.js';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DiceService } from '../src/game/dice.service.js';
 import { PrismaService } from '../src/prisma/prisma.service.js';
 import { createTestApp, uniqueUsername } from './test-app.js';
@@ -26,13 +27,13 @@ interface Player {
 let rolls: DiceRoll[] = [];
 
 const dice = {
-  rollPair(): DiceRoll {
+  rollPair: vi.fn((): DiceRoll => {
     const roll = rolls.shift();
     if (roll === undefined) {
       throw new Error('Game test rolled more times than it scripted');
     }
     return roll;
-  },
+  }),
 };
 
 function script(...next: DiceRoll[]): void {
@@ -45,6 +46,7 @@ describe('Games (e2e)', () => {
 
   beforeEach(async () => {
     rolls = [];
+    dice.rollPair.mockClear();
     app = await createTestApp({
       configure: (builder) => {
         builder.overrideProvider(DiceService).useValue(dice);
@@ -208,6 +210,41 @@ describe('Games (e2e)', () => {
       expect(body).toMatchObject({ message: 'Missing bearer token' });
     });
 
+    it('answers 401 to /roll and /hold without a valid token, even one naming the active player, and never rolls', async () => {
+      script([3, 4]);
+      const game = await createGame();
+      await authed(player1.token, `/api/games/${game.id}/roll`).expect(200);
+      const jwt = app.get(JwtService);
+      const activePlayer = { sub: player1.id, username: player1.username };
+      const invalidTokens = [
+        'not-a-jwt',
+        await jwt.signAsync(activePlayer, { expiresIn: -1 }),
+        await jwt.signAsync(activePlayer, { secret: 'an-attacker-chosen-secret-of-32-chars' }),
+      ];
+
+      for (const action of ['roll', 'hold']) {
+        const path = `/api/games/${game.id}/${action}`;
+        const missing = await server().post(path).expect(401);
+        expect(missing.body).toEqual({ statusCode: 401, error: 'Unauthorized', message: 'Missing bearer token' });
+        for (const token of invalidTokens) {
+          const invalid = await authed(token, path).expect(401);
+          expect(invalid.body).toEqual({
+            statusCode: 401,
+            error: 'Unauthorized',
+            message: 'Invalid or expired access token',
+          });
+        }
+      }
+
+      expect(dice.rollPair).toHaveBeenCalledTimes(1);
+      expect(await prisma.game.findUniqueOrThrow({ where: { id: game.id } })).toMatchObject({
+        activePlayerId: player1.id,
+        currentRoundScore: 7,
+        player1GlobalScore: 0,
+        version: 2,
+      });
+    });
+
     it('rejects a hold before any points have been rolled', async () => {
       const game = await createGame();
 
@@ -216,6 +253,67 @@ describe('Games (e2e)', () => {
         statusCode: 400,
         error: 'Bad Request',
         message: 'Cannot hold without points in the current round',
+      });
+    });
+
+    it('keeps the turn with player 1 while standard rolls add up, then a double six wipes the round and passes it to player 2', async () => {
+      script([2, 3], [4, 4], [6, 6]);
+      const game = await createGame();
+      const roll = (player: Player) => authed(player.token, `/api/games/${game.id}/roll`);
+      const row = () => prisma.game.findUniqueOrThrow({ where: { id: game.id } });
+
+      const first = stateFrom(await roll(player1).expect(200));
+      const second = stateFrom(await roll(player1).expect(200));
+      expect(first).toMatchObject({ roundScore: 5, lastRoll: [2, 3], lastOutcome: 'STANDARD', activePlayerId: player1.id });
+      expect(second).toMatchObject({ roundScore: 13, lastRoll: [4, 4], lastOutcome: 'STANDARD', activePlayerId: player1.id });
+      expect(await row()).toMatchObject({ activePlayerId: player1.id, currentRoundScore: 13, version: 3 });
+
+      const bust = stateFrom(await roll(player1).expect(200));
+      expect(bust).toMatchObject({
+        status: 'ACTIVE',
+        roundScore: 0,
+        lastRoll: [6, 6],
+        lastOutcome: 'DOUBLE_SIX',
+        activePlayerId: player2.id,
+        version: 4,
+        players: { player1: { globalScore: 0 }, player2: { globalScore: 0 } },
+      });
+      expect(await row()).toMatchObject({
+        activePlayerId: player2.id,
+        currentRoundScore: 0,
+        player1GlobalScore: 0,
+        lastDie1: 6,
+        lastDie2: 6,
+        lastOutcome: 'DOUBLE_SIX',
+        version: 4,
+      });
+      expect(dice.rollPair).toHaveBeenCalledTimes(3);
+
+      await roll(player1).expect(403);
+    });
+
+    it("refuses player 2's /roll and /hold during player 1's turn with 403, without rolling or touching player 1's round", async () => {
+      script([3, 4]);
+      const game = await createGame();
+      await authed(player1.token, `/api/games/${game.id}/roll`).expect(200);
+
+      for (const action of ['roll', 'hold']) {
+        const { body } = await authed(player2.token, `/api/games/${game.id}/${action}`).expect(403);
+        expect(body).toEqual({ statusCode: 403, error: 'Forbidden', message: 'Not your turn' });
+      }
+
+      expect(dice.rollPair).toHaveBeenCalledTimes(1);
+      expect(await prisma.game.findUniqueOrThrow({ where: { id: game.id } })).toMatchObject({
+        activePlayerId: player1.id,
+        currentRoundScore: 7,
+        player1GlobalScore: 0,
+        player2GlobalScore: 0,
+        version: 2,
+      });
+      const banked = stateFrom(await authed(player1.token, `/api/games/${game.id}/hold`).expect(200));
+      expect(banked).toMatchObject({
+        activePlayerId: player2.id,
+        players: { player1: { globalScore: 7 }, player2: { globalScore: 0 } },
       });
     });
 
@@ -321,6 +419,37 @@ describe('Games (e2e)', () => {
       const kept = stateFrom(await authed(player1.token, `/api/games/${rematch.id}/reset`, {}).expect(201));
       expect(kept.targetScore).toBe(50);
       expect(kept.id).not.toBe(rematch.id);
+    });
+
+    it("adds one to the winner's wins in the database for every game they win", async () => {
+      script([5, 5], [6, 4]);
+
+      async function winAsPlayer1(gameId: string): Promise<void> {
+        await authed(player1.token, `/api/games/${gameId}/roll`).expect(200);
+        const won = stateFrom(await authed(player1.token, `/api/games/${gameId}/hold`).expect(200));
+        expect(won).toMatchObject({
+          status: 'FINISHED',
+          winnerId: player1.id,
+          lastOutcome: 'WIN',
+          players: { player1: { globalScore: 10 } },
+        });
+        expect(await prisma.game.findUniqueOrThrow({ where: { id: gameId } })).toMatchObject({
+          status: 'FINISHED',
+          winnerId: player1.id,
+        });
+      }
+
+      const first = await createGame(10);
+      await winAsPlayer1(first.id);
+      const rematch = stateFrom(await authed(player2.token, `/api/games/${first.id}/reset`, {}).expect(201));
+      await winAsPlayer1(rematch.id);
+
+      const [winner, loser] = await Promise.all([
+        prisma.user.findUniqueOrThrow({ where: { id: player1.id } }),
+        prisma.user.findUniqueOrThrow({ where: { id: player2.id } }),
+      ]);
+      expect(winner).toMatchObject({ wins: 2, gamesPlayed: 2 });
+      expect(loser).toMatchObject({ wins: 0, gamesPlayed: 2 });
     });
 
     it('rejects a reset from someone who is not in the game, and an unknown game', async () => {

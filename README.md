@@ -16,6 +16,8 @@ The project is a pnpm + Turborepo monorepo with three workspaces:
 - [Repository layout](#repository-layout)
 - [Scripts](#scripts)
 - [Game rules](#game-rules)
+- [Assumptions](#assumptions)
+- [What I'd do differently with more time](#what-id-do-differently-with-more-time)
 - [API reference](#api-reference)
 - [Architecture Decision Records](#architecture-decision-records)
 - [Security checklist](#security-checklist)
@@ -105,6 +107,50 @@ All rules are enforced in `apps/api/src/game/game.service.ts`. The client never 
 
 Every mutation first checks `status === 'ACTIVE'` (else `409`) and `activePlayerId === <JWT sub>` (else `403 Not your turn`).
 
+## Assumptions
+
+A few rules and product choices are left open by the prompt. This is how they are interpreted here.
+
+### Same-page dual-slot JWT auth
+
+Both players sit at one browser. A cookie names a single identity per origin, so it cannot tell the API which of the two people pressed Roll. Each seat stores its own access token (`slot1` and `slot2` in the Zustand store). Roll and hold send the Bearer token of the slot whose user id equals `activePlayerId`. The server still checks that the JWT subject is the active player. The tradeoff is written out in [ADR-003](#adr-003-same-page-dual-auth-with-per-slot-bearer-tokens).
+
+### 6 & 6 scoring
+
+Only a roll of 6 and 6 ends the round: `roundScore` is set to 0, the turn passes, and the two-second lockout plays. Points already banked on `globalScore` stay where they are. Any other pair, including a lone 6, adds both faces to the round and the same player rolls again.
+
+### Zero-point holds and `canWinOnHold`
+
+Hold is rejected with `400` when `roundScore === 0` — the start of a turn, and the state right after a 6 & 6. The client disables the Hold button in that case; the API is what makes the action illegal.
+
+When the active player's banked score plus the current round would reach `targetScore`, and the game is still `ACTIVE`, the API sets `canWinOnHold: true` on the returned `GameStateDto`. The arena reads that flag, disables Roll, and highlights Hold. The comparison lives in `toGameState` on the server, so the client never evaluates `globalScore + roundScore >= targetScore` itself. Holding is still what finishes the game; the flag tells the UI that the winning bank is available.
+
+### Zero-config local stack
+
+Development needs no extra services. The API uses a SQLite file (`apps/api/prisma/dev.db`) created by `pnpm db:push`, with a development-only JWT secret and a localhost CORS origin. The opponent is a heuristic in `AiStrategyService`: hold at a round total of 21, or 32 when the opponent is within 18 points of the target, and always hold when that hold would win. Dice sounds, the penalty, the win fanfare, and the music are synthesised in the browser with the Web Audio API, so the repository ships no audio files.
+
+## What I'd do differently with more time
+
+### WebSockets for multi-device play
+
+The match assumes both humans share a screen, and the AI's turn is a client timer calling `ai-step`. A WebSocket room per game, with the server pushing each new `GameStateDto`, would let two devices play the same match and would replace that playback loop.
+
+### httpOnly refresh-token rotation
+
+Access tokens sit in `localStorage` for 12 hours and cannot be revoked. I would issue a short-lived access token and a rotating refresh token in an `httpOnly` `Secure` cookie, store only a hash of the refresh token, and revoke the token family if a rotated token is presented again.
+
+### PostgreSQL, Redis, and an append-only TurnHistory
+
+SQLite is a single file and a single writer. I would move the API to PostgreSQL with a connection pool, and use Redis for rate-limit counters, refresh-token families, and a short per-game lock in front of the existing `version` check. Every roll and hold would also append a `TurnHistory` row — actor, dice, outcome, scores before and after, version — so a match can be replayed from the log.
+
+### URL-based match resumption
+
+The current game is restored from `localStorage` on this browser. A route such as `/games/:id` would load the canonical state from the API after the player signs in, so a reload, a second tab, or a shared link opens the same match.
+
+### Playwright browser end-to-end tests
+
+API e2e tests drive Nest with supertest, and the web tests mock `fetch`. A Playwright suite against the real API and a real browser would register both seats, play a match, and check the 6 & 6 lockout, the `canWinOnHold` button state, and the AI's turn on the actual screen.
+
 ## API reference
 
 All routes are prefixed with `/api`. Request and response bodies are validated with the schemas in `packages/shared`; validation failures return `400` with a structured `issues` array.
@@ -128,7 +174,7 @@ Every game endpoint returns the canonical `GameStateDto`:
 {
   id, status: 'ACTIVE' | 'FINISHED', targetScore, activePlayerId, roundScore,
   lastRoll: [d1, d2] | null, lastOutcome: 'STANDARD' | 'DOUBLE_SIX' | 'HOLD' | 'WIN' | null,
-  winnerId: string | null, version: number,
+  winnerId: string | null, version: number, canWinOnHold: boolean,
   players: { player1: { id, username, isAi, wins, globalScore }, player2: { ... } }
 }
 ```
@@ -266,8 +312,6 @@ Implemented and covered by unit or e2e tests unless noted.
 - [x] Persisted sessions in `localStorage` are re-validated with Zod on load; anything tampered or stale is discarded.
 - [x] The same user cannot occupy both player slots.
 - [x] No secrets in the client bundle: only `VITE_API_BASE_URL` is read, and it is validated as an `http(s)` URL.
-
-**Not in scope** (would be next for a production deployment): refresh-token rotation and server-side revocation, HTTPS termination and HSTS at the edge, audit logging, and moving from SQLite to a networked database with connection pooling.
 
 ## Audio
 
